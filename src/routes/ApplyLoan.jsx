@@ -1,615 +1,680 @@
 import React, { useState, useEffect } from 'react';
-import UploadFile from '../Components/UploadFile';
 import moment from 'moment';
 import axios from 'axios';
 import { useLoader } from '../loader/LoaderContext';
-import { database } from '../DB/Firebase';
-import { equalTo, get, orderByChild, query, ref } from 'firebase/database';
 import { toast } from 'react-toastify';
+import { BASE_URL } from '../config/api';
 
 const ApplyLoan = () => {
   const { showLoader, hideLoader } = useLoader();
-    const initialFormData = {
-      branch:'',
-      memberId: '',
-      memberName: '',
-      gId: '',
-      gName: '',
-      loanAmount: '',
-      memberAge: '',
-      memberType: '',
-      loantype: 'Reducing',
-      interest: '',
-      tenure: '',
-      loanName: 'A5',
-      orderid:'',
-      Doctype:'Aadhar',
-      orderValue:''
-    };
-    
-      const [formdata, setformdata] = useState(initialFormData);
-      const [loan, setloan] = useState([])
 
-      const [documents, setDocuments] = useState([]); // Manage documents as an array
+  const initialFormData = {
+    branch: '',
+    branchName: '',
+    memberId: '',
+    memberName: '',
+    memberAge: '',
+    memberType: '',
+    gId: '',
+    gName: '',
+    gAge: '',
+    gType: '',
+    loanProductId: '',
+    loanName: '',
+    loanAmount: '',
+    loantype: 'Flat',
+    interest: '',
+    tenure: '',
+    frequency: 'Monthly',
+    emi: '',
+    loanPurpose: '',
+    Doctype: 'Aadhar',
+  };
 
-      const handleAddDocument = async(image) => {
-        showLoader()
-        let url=await UploadFile(image)
-        console.log(url)
-        setDocuments((prevDocuments) => [
-          ...prevDocuments,
-          { id: Date.now(), image:url ,name:formdata.Doctype}, // Unique ID for each document
-        ]);
-        hideLoader()
-        console.log(documents)
-      };
+  const [formdata, setformdata] = useState(initialFormData);
+  const [loanProducts, setLoanProducts] = useState([]);
+  const [branches, setBranches] = useState([]);
+  const [documents, setDocuments] = useState([]);
+  const [table, settable] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
-  const GetLoan=async()=>{
-    showLoader()
-    try {
-      const res=await axios.get('https://api.duniyamart.duniyape.in/view-loan-product/'+"I89nD59Ra69j0ee512TsW143eEt03u")
-      console.log((Object.values(res.data)))
-      setloan(Object.values(res.data))
-    } catch (error) {
-      console.log(error)
-    } finally {
-      hideLoader()
-    }
-  }
-  const getmemberdata=async()=>{
-    showLoader()
-    console.log("Getmember data")
-  const api = 'https://api.duniyamart.duniyape.in/fatch-member-id-name/'+formdata.memberId+'/'+"I89nD59Ra69j0ee512TsW143eEt03u"
-    try{
-      const res = await axios.get(api);
-      if(res.data){
-        if(res.data.share){
+  // MongoDB _id refs (required by server)
+  const [memberMongoId, setMemberMongoId] = useState('');
+  const [guarantorMongoId, setGuarantorMongoId] = useState('');
+  const [agentMongoId, setAgentMongoId] = useState('');
 
-          setformdata({...formdata,memberName:res.data.FirstName+' '+res.data.LastName, memberAge:res.data.Age, memberType:res.data.MemberCategory,branch:res.data.BranchCode});
-        }else{
-          toast.warning("Membership Fee Pending")
+  // ── 1. Fetch Branches & Loan Products on mount ────────────────────────────
+  useEffect(() => {
+    const fetchDropdowns = async () => {
+      showLoader();
+      try {
+        // GET /branches
+        const branchRes = await axios.get(`${BASE_URL}/branches`);
+        let bList = Array.isArray(branchRes.data)
+          ? branchRes.data
+          : branchRes.data?.data || branchRes.data?.branches || [];
+        setBranches(bList);
+        console.log('[ApplyLoan] Branches:', bList);
+      } catch (err) {
+        console.error('[ApplyLoan] /branches error:', err);
+        toast.error('Could not load branches.');
+      }
+
+      try {
+        // GET /loan-products
+        const prodRes = await axios.get(`${BASE_URL}/loan-products`);
+        let pList = Array.isArray(prodRes.data)
+          ? prodRes.data
+          : prodRes.data?.data || prodRes.data?.products || [];
+        setLoanProducts(pList);
+        console.log('[ApplyLoan] Loan Products:', pList);
+      } catch (err) {
+        console.error('[ApplyLoan] /loan-products error:', err);
+        toast.error('Could not load loan products.');
+      } finally {
+        hideLoader();
+      }
+
+      // GET /agents → find logged-in agent's MongoDB _id by AUID
+      try {
+        const AUID = localStorage.getItem('AUID') || '';
+        if (AUID) {
+          const agentRes = await axios.get(`${BASE_URL}/agents`);
+          let agentList = Array.isArray(agentRes.data)
+            ? agentRes.data
+            : agentRes.data?.data || agentRes.data?.agents || [];
+          const foundAgent = agentList.find((a) => {
+            const codes = [
+              a.agentCode, a.AgentCode, a.agent_code,
+              a.memberId, a.MemberNo, a.memberNo, a.code
+            ].map((v) => String(v || '').toLowerCase().trim());
+            return codes.includes(AUID.toLowerCase());
+          });
+          if (foundAgent) {
+            const aId = String(foundAgent._id?.$oid || foundAgent._id || foundAgent.id || '');
+            setAgentMongoId(aId);
+            console.log('[ApplyLoan] Agent MongoDB _id:', aId);
+          } else {
+            console.warn('[ApplyLoan] Agent not found for AUID:', AUID);
+          }
         }
- 
-    }else{
-        setformdata({...formdata,memberName:'',memberAge:'',memberType:''});
-        // setValidationErrors({...validationErrors,'memberId':true}) 
-    }
-    }catch(error){
-      console.error('Error',error);
-    }finally{
-      hideLoader()
-    }
-}
-
-const getguarantordata=async()=>{
-  showLoader()
-  const api = 'https://api.duniyamart.duniyape.in/fatch-member-id-name/'+formdata.gId+'/'+"I89nD59Ra69j0ee512TsW143eEt03u"
-    try{
-      const res = await axios.get(api);
-      console.log(res)
-      if(res.data){
-        setformdata({...formdata,gName:res.data.FirstName+' '+res.data.LastName, gAge:res.data.gAge, gType:res.data.gCategory});
-      }else{
-        setformdata({...formdata,gName:'', gAge:'', gType:''});
-        // setValidationErrors({...validationErrors,"gId":true})    
-    }
-    }catch(error){
-      console.log(error);
-    }finally{
-      hideLoader()
-    }
-}
-
-useEffect(() => {
-  GetLoan()
-}, [])
-
-
-const state = {
-  tableHead: ['Sno.','EMI', 'Principal', 'Interest', 'Amount']
-}
-
-const [table, settable] = useState('')
-
-const sadule = () => {
-    if(formdata.loanAmount===''||formdata.interest===''||formdata.tenure===""){
-        console.log("Not present")
-    }
-
-  let P = parseFloat(formdata.loanAmount);
-  const R = parseFloat(formdata.interest) / 100 / 12;
-  let N = parseFloat(formdata.tenure);
-  const T= parseFloat(formdata.tenure);
-
-  let xtable = []
-  let array=[]
-  let sumInt=0;
-  let sumEMI=0;
-  let sumAmt=0;
-  let B=P;
-
-  let sno = 1
-
-  for(let i=1;i<=T;i++){
-    let emi,I,A;
-    if(formdata.loantype==="Flat"){
-      emi=(P*R*T+P*1)/T
-      I=(P*R*T)/T
-      A=emi-I
-      B=B-A
-      sumEMI+=emi
-      sumInt+=I
-      sumAmt+=A
-    array=[...array,{EMI:parseFloat(emi).toFixed(2),Int:parseFloat(I).toFixed(2),Amt:parseFloat(A).toFixed(2),Bal:parseFloat(B).toFixed(0)}];
-
-    xtable = [...xtable,[sno,parseFloat(emi).toFixed(0),parseFloat(I).toFixed(0),parseFloat(A).toFixed(0),parseFloat(P).toFixed(0)]]
-    sno++
-
-    }else{
-      emi = (P * R * (1 + R) ** N) / (((1 + R) ** N) - 1);
-      sumEMI+=emi
-      I=P*R
-      sumInt+=I
-      A=emi-I;  
-      P=P-A
-      N=N-1;
-      sumAmt+=A
-
-    array=[...array,{EMI:parseFloat(emi).toFixed(0),Int:parseFloat(I).toFixed(0),Amt:parseFloat(A).toFixed(0),Bal:parseFloat(P).toFixed(0)}];
-
-    xtable = [...xtable,[sno,parseFloat(emi).toFixed(0),parseFloat(I).toFixed(0),parseFloat(A).toFixed(0),parseFloat(P).toFixed(0)]]
-    sno++
-    }
-  }
-  console.log({array,TotalAmt:parseFloat(sumEMI).toFixed(0),TotalInt:parseFloat(sumInt).toFixed(0)})
-  // console.log([...xtable,['Total -',parseFloat(sumEMI).toFixed(0),parseFloat(sumInt).toFixed(0),parseFloat(sumAmt).toFixed(0),'']])
-  settable({array,TotalAmt:parseFloat(sumEMI).toFixed(0),TotalInt:parseFloat(sumInt).toFixed(0)})
-  // setsanction({Details:array,TotalEMI:parseFloat(sumEMI).toFixed(0),TotalInt:parseFloat(sumInt).toFixed(0),TotalAmt:parseFloat(sumAmt).toFixed(0)})
-};
-
-const getTData = async () => {
-  if (!formdata.loanName || !formdata.loantype || !formdata.tenure) return;
-  showLoader()
-
-  const api = `https://api.duniyamart.duniyape.in/get-loan-parameter/Loan/${formdata.loanName}/Month/${formdata.loantype}/I89nD59Ra69j0ee512TsW143eEt03u`;
-
-  console.log("Fetching from:", api);
-
-  try {
-    const res = await axios.get(api);
-
-    if (res && res.data) {
-      const data = Object.values(res.data);
-
-      const matched = data.find(item =>
-        parseInt(formdata.tenure) >= parseInt(item.From) &&
-        parseInt(formdata.tenure) <= parseInt(item.To)
-      );
-
-      if (matched) {
-        setformdata(prev => ({
-          ...prev,
-          interest: matched.RateofInterest,
-          processingfee: matched.ProcessingFee,
-          gst: matched.GST
-        }));
-
-        console.log("Interest Rate:", matched.RateofInterest);
-      } else {
-        console.warn("No matching tenure range found.");
+      } catch (err) {
+        console.warn('[ApplyLoan] /agents lookup error:', err?.message);
       }
-    }
-  } catch (error) {
-    console.error("Failed to fetch loan parameters:", error);
-  }finally{
-    hideLoader()
-  }
-};
+    };
 
-useEffect(() => {
-  getTData();
-}, [formdata.loanName, formdata.loantype, formdata.tenure]);  
-   
-  const getorder = async () => {
-    const orderID = parseInt(formdata.orderid);
-    if (!orderID) {
-      console.warn("Invalid OrderID");
-      return;
-    }
-    const ordersRef = ref(database, "Orders");
-    const q = query(ordersRef, orderByChild("OrderID"), equalTo(orderID));
-   showLoader()
+    fetchDropdowns();
+  }, []);
+
+  // ── 2. Fetch Member Data ─────────────────────────────────────────────────
+  const getmemberdata = async () => {
+    const mid = formdata.memberId.trim();
+    if (!mid) { toast.error('Please enter a Member ID'); return; }
+    showLoader();
     try {
-      const snapshot = await get(q);
-      const orderData = snapshot.val();
-      const orderObj = orderData ? Object.values(orderData)[0] : null;
+      // GET /get-members → filter by memberId
+      const res = await axios.get(`${BASE_URL}/get-members`);
+      let rawList = [];
+      if (Array.isArray(res.data)) rawList = res.data;
+      else if (Array.isArray(res.data?.data)) rawList = res.data.data;
 
-      if (orderObj?.Total) {
-        setformdata(prev => ({
-          ...prev,
-          loanAmount: parseFloat(orderObj.Total).toFixed(2),
-          orderValue: parseFloat(orderObj.Total).toFixed(2)
+      const found = rawList.find((m) => {
+        const ids = [
+          m.memberId, m.MemberId, m.MemberNo, m.memberNo,
+          m.MemberCode, m.memberCode, m._id, m.id
+        ].map((v) => String(v || '').toLowerCase().trim());
+        return ids.includes(mid.toLowerCase());
+      });
+
+      if (found) {
+        const fn = found.FirstName || found.first_name || '';
+        const ln = found.LastName || found.last_name || '';
+        const fullName = `${fn} ${ln}`.trim() || found.name || '';
+        // Store the real MongoDB _id
+        const mongoId = String(found._id?.$oid || found._id || found.id || '');
+        setMemberMongoId(mongoId);
+        console.log('[ApplyLoan] Member MongoDB _id:', mongoId);
+        setformdata((p) => ({
+          ...p,
+          memberName: fullName,
+          memberAge: found.Age || found.age || '',
+          memberType: found.MemberCategory || found.memberType || found.MemberType || '',
+          branch: found.BranchCode || found.branch_code || '',
+          branchName: found.BranchName || found.branchName || '',
         }));
-        console.log("Order Total:", orderObj.Total);
+        toast.success(`Member found: ${fullName}`);
+        console.log('[ApplyLoan] Member found:', found);
       } else {
-        console.warn("Order not found or missing Total");
+        setMemberMongoId('');
+        setformdata((p) => ({ ...p, memberName: '', memberAge: '', memberType: '' }));
+        toast.error(`Member ID "${mid}" not found.`);
       }
     } catch (error) {
-      console.error("Error fetching order:", error);
-    } finally{
-     hideLoader()
+      console.error('[ApplyLoan] /get-members error:', error);
+      toast.error('Failed to fetch member data.');
+    } finally {
+      hideLoader();
     }
   };
 
+  // ── 3. Fetch Guarantor Data ──────────────────────────────────────────────
+  const getguarantordata = async () => {
+    const gid = formdata.gId.trim();
+    if (!gid) { toast.error('Please enter a Guarantor ID'); return; }
+    showLoader();
+    try {
+      // GET /get-members → filter by gId
+      const res = await axios.get(`${BASE_URL}/get-members`);
+      let rawList = [];
+      if (Array.isArray(res.data)) rawList = res.data;
+      else if (Array.isArray(res.data?.data)) rawList = res.data.data;
 
-  const Create=async(e)=>{
+      const found = rawList.find((m) => {
+        const ids = [
+          m.memberId, m.MemberId, m.MemberNo, m.memberNo,
+          m.MemberCode, m.memberCode, m._id, m.id
+        ].map((v) => String(v || '').toLowerCase().trim());
+        return ids.includes(gid.toLowerCase());
+      });
+
+      if (found) {
+        const fn = found.FirstName || found.first_name || '';
+        const ln = found.LastName || found.last_name || '';
+        const fullName = `${fn} ${ln}`.trim() || found.name || '';
+        // Store the real MongoDB _id
+        const gMongoId = String(found._id?.$oid || found._id || found.id || '');
+        setGuarantorMongoId(gMongoId);
+        console.log('[ApplyLoan] Guarantor MongoDB _id:', gMongoId);
+        setformdata((p) => ({
+          ...p,
+          gName: fullName,
+          gAge: found.Age || found.age || '',
+          gType: found.MemberCategory || found.memberType || found.MemberType || '',
+        }));
+        toast.success(`Guarantor found: ${fullName}`);
+        console.log('[ApplyLoan] Guarantor found:', found);
+      } else {
+        setGuarantorMongoId('');
+        setformdata((p) => ({ ...p, gName: '', gAge: '', gType: '' }));
+        toast.error(`Guarantor ID "${gid}" not found.`);
+      }
+    } catch (error) {
+      console.error('[ApplyLoan] /get-members (guarantor) error:', error);
+      toast.error('Failed to fetch guarantor data.');
+    } finally {
+      hideLoader();
+    }
+  };
+
+  // ── Auto-calculate EMI ─────────────────────────────────────────────────────
+  useEffect(() => {
+    const P = parseFloat(formdata.loanAmount);
+    const R = parseFloat(formdata.interest) / 100 / 12;
+    const T = parseFloat(formdata.tenure);
+    if (!P || !R || !T || P <= 0 || R <= 0 || T <= 0) { setformdata((p) => ({ ...p, emi: '' })); return; }
+
+    let emi = 0;
+    if (formdata.loantype === 'Flat') {
+      emi = (P * R * T + P) / T;
+    } else {
+      const compound = Math.pow(1 + R, T);
+      emi = (P * R * compound) / (compound - 1);
+    }
+    setformdata((p) => ({ ...p, emi: emi.toFixed(2) }));
+  }, [formdata.loanAmount, formdata.interest, formdata.tenure, formdata.loantype]);
+
+  // ── View EMI Schedule ──────────────────────────────────────────────────────
+  const sadule = () => {
+    const P0 = parseFloat(formdata.loanAmount);
+    const R = parseFloat(formdata.interest) / 100 / 12;
+    const T = parseFloat(formdata.tenure);
+    if (!P0 || !R || !T) { toast.error('Please enter Loan Amount, Interest & Tenure'); return; }
+
+    let P = P0;
+    let N = T;
+    let array = [];
+    let sumEMI = 0, sumInt = 0;
+
+    for (let i = 1; i <= T; i++) {
+      let emi, I, A;
+      if (formdata.loantype === 'Flat') {
+        emi = (P0 * R * T + P0) / T;
+        I = (P0 * R * T) / T;
+        A = emi - I;
+        P -= A;
+      } else {
+        emi = (P * R * Math.pow(1 + R, N)) / (Math.pow(1 + R, N) - 1);
+        I = P * R;
+        A = emi - I;
+        P -= A;
+        N -= 1;
+      }
+      sumEMI += emi;
+      sumInt += I;
+      array.push({
+        EMI: emi.toFixed(2),
+        Int: I.toFixed(2),
+        Amt: A.toFixed(2),
+        Bal: P.toFixed(0),
+      });
+    }
+    settable({ array, TotalAmt: sumEMI.toFixed(0), TotalInt: sumInt.toFixed(0) });
+  };
+
+  // ── Document Upload ────────────────────────────────────────────────────────
+  const handleAddDocument = (file) => {
+    if (!file) return;
+    setDocuments((prev) => [
+      ...prev,
+      { id: Date.now(), file, name: formdata.Doctype, fileName: file.name },
+    ]);
+    toast.success(`Document added: ${file.name}`);
+  };
+
+  // ── 8. Submit Loan → POST /loan-requests ──────────────────────────────────
+  const Create = async (e) => {
     e.preventDefault();
-    
-     if(formdata.loanAmount===''||formdata.interest===''||formdata.tenure===""){
-        console.log("Not present")
+    setSubmitting(true);
+    showLoader();
+
+    // Recalculate schedule for payload
+    const P0 = parseFloat(formdata.loanAmount);
+    const R = parseFloat(formdata.interest) / 100 / 12;
+    const T = parseFloat(formdata.tenure);
+    let scheduleArray = [];
+    let sumEMI = 0;
+
+    if (P0 && R && T) {
+      let P = P0, N = T;
+      for (let i = 1; i <= T; i++) {
+        let emi, I, A;
+        if (formdata.loantype === 'Flat') {
+          emi = (P0 * R * T + P0) / T;
+          I = (P0 * R * T) / T;
+          A = emi - I;
+          P -= A;
+        } else {
+          emi = (P * R * Math.pow(1 + R, N)) / (Math.pow(1 + R, N) - 1);
+          I = P * R;
+          A = emi - I;
+          P -= A;
+          N -= 1;
+        }
+        sumEMI += emi;
+        scheduleArray.push({ EMI: emi.toFixed(2), Int: I.toFixed(2), Amt: A.toFixed(2), Bal: P.toFixed(0) });
+      }
     }
 
-  let P = parseFloat(formdata.loanAmount);
-  const R = parseFloat(formdata.interest) / 100 / 12;
-  let N = parseFloat(formdata.tenure);
-  const T= parseFloat(formdata.tenure);
+    const firstEMI = scheduleArray.length > 0 ? scheduleArray[0].EMI : '';
 
-  let xtable = []
-  let array=[]
-  let sumInt=0;
-  let sumEMI=0;
-  let sumAmt=0;
-  let B=P;
+    // Build FormData — field names match ENTERPRISES /loan-requests API
+    const fd = new FormData();
 
-  let sno = 1
+    // Required IDs — use MongoDB _id (ObjectId), NOT display codes
+    fd.append('member_id',        memberMongoId || formdata.memberId);
+    fd.append('memberId',         formdata.memberId);       // display code for reference
+    fd.append('branch_id',        formdata.branch);         // already stored as _id from branch select
+    fd.append('loan_product_id',  formdata.loanProductId);  // already stored as _id from product select
 
-  for(let i=1;i<=T;i++){
-    let emi,I,A;
-    if(formdata.loantype==="Flat"){
-      emi=(P*R*T+P*1)/T
-      I=(P*R*T)/T
-      A=emi-I
-      B=B-A
-      sumEMI+=emi
-      sumInt+=I
-      sumAmt+=A
-    array=[...array,{EMI:parseFloat(emi).toFixed(2),Int:parseFloat(I).toFixed(2),Amt:parseFloat(A).toFixed(2),Bal:parseFloat(B).toFixed(0)}];
 
-    xtable = [...xtable,[sno,parseFloat(emi).toFixed(0),parseFloat(I).toFixed(0),parseFloat(A).toFixed(0),parseFloat(P).toFixed(0)]]
-    sno++
+    // Amounts & Loan params
+    fd.append('requestedAmount',  parseFloat(formdata.loanAmount) || 0);
+    fd.append('loanAmount',       parseFloat(formdata.loanAmount) || 0);
+    fd.append('requestedTenure',  parseInt(formdata.tenure, 10) || 0);
+    fd.append('loanTenure',       parseInt(formdata.tenure, 10) || 0);
+    fd.append('roi',              formdata.interest);
+    fd.append('ROI',              formdata.interest);
+    fd.append('emi',              firstEMI);
+    fd.append('EMI',              firstEMI);
+    fd.append('frequency',        formdata.frequency || 'Monthly');
+    fd.append('interestType',     formdata.loantype);
+    fd.append('InterestType',     formdata.loantype);
 
-    }else{
-      emi = (P * R * (1 + R) ** N) / (((1 + R) ** N) - 1);
-      sumEMI+=emi
-      I=P*R
-      sumInt+=I
-      A=emi-I;  
-      P=P-A
-      N=N-1;
-      sumAmt+=A
+    // Member info
+    fd.append('memberName',       formdata.memberName);
+    fd.append('MemberName',       formdata.memberName);
+    fd.append('memberType',       formdata.memberType);
+    fd.append('age',              formdata.memberAge);
+    fd.append('Age',              formdata.memberAge);
 
-    array=[...array,{EMI:parseFloat(emi).toFixed(0),Int:parseFloat(I).toFixed(0),Amt:parseFloat(A).toFixed(0),Bal:parseFloat(P).toFixed(0)}];
+    // Branch & product names
+    fd.append('branchName',       formdata.branchName);
+    fd.append('BranchName',       formdata.branchName);
+    fd.append('selectedLoan',     formdata.loanName);
+    fd.append('LoanName',         formdata.loanName);
+    fd.append('productType',      'Loan');
+    fd.append('durationIn',       'Months');
 
-    xtable = [...xtable,[sno,parseFloat(emi).toFixed(0),parseFloat(I).toFixed(0),parseFloat(A).toFixed(0),parseFloat(P).toFixed(0)]]
-    sno++
+    // Guarantor — use MongoDB _id for guarantor_id
+    fd.append('guarantorId',      guarantorMongoId || formdata.gId);
+    fd.append('GID',              formdata.gId);            // display code for reference
+
+    fd.append('guarantorName',    formdata.gName);
+    fd.append('Gname',            formdata.gName);
+    fd.append('guarantorType',    formdata.gType);
+    fd.append('Gtype',            formdata.gType);
+    fd.append('guarantorAge',     formdata.gAge);
+    fd.append('Gage',             formdata.gAge);
+
+    // Introducer / Agent — use MongoDB _id, NOT the AUID display code
+    fd.append('agent_id',         agentMongoId || localStorage.getItem('AUID') || '');
+    fd.append('agent_code',       localStorage.getItem('AUID') || '');  // display code
+    fd.append('introducer_id',    agentMongoId || localStorage.getItem('AUID') || '');
+    fd.append('introducer',       localStorage.getItem('AUID') || '');  // display code
+    fd.append('IntroCode',        localStorage.getItem('AUID') || '');  // display code
+
+    // Misc
+    fd.append('date',             moment().format('YYYY-MM-DD'));
+    fd.append('Date',             moment().format('YYYY-MM-DD'));
+    fd.append('loanPurpose',      formdata.loanPurpose || '');
+    fd.append('Purpose',          formdata.loanPurpose || '');
+    fd.append('status',           'Pending');
+    fd.append('Status',           'Pending');
+    fd.append('EmpID',            'admin');
+    fd.append('schedule',         JSON.stringify(scheduleArray));
+
+    // Documents
+    const docsMeta = [];
+    documents.forEach((doc, idx) => {
+      const fileKey = `document_${idx}`;
+      fd.append(fileKey, doc.file);
+      docsMeta.push({ name: doc.name, fileKey });
+    });
+    fd.append('additionalDocs', JSON.stringify(docsMeta));
+
+    console.log('===== LOAN FORM DATA =====');
+    for (let [key, val] of fd.entries()) {
+      console.log(`${key}:`, val);
     }
-  }
-  console.log({array,TotalAmt:parseFloat(sumEMI).toFixed(0),TotalInt:parseFloat(sumInt).toFixed(0)})
-  // console.log([...xtable,['Total -',parseFloat(sumEMI).toFixed(0),parseFloat(sumInt).toFixed(0),parseFloat(sumAmt).toFixed(0),'']])
-  const tableme = {array,TotalAmt:parseFloat(sumEMI).toFixed(0),TotalInt:parseFloat(sumInt).toFixed(0)}
-    
-    showLoader()
-    const data={
-      Date:moment(new Date()).format('yyyy-MM-DD'),
-      BranchCode:formdata.branch,
-      ProductType:'Loan',
-      PlanDuration:'Month',
-      MID:formdata.memberId,
-      MemberName:formdata.memberName,
-      LoanName:formdata.loanName,
-      Age:formdata.memberAge,
-      Type:formdata.memberType,
-      Purpose:formdata.orderid,
-      Principal:formdata.loanAmount,
-      ROI:formdata.interest,
-      Tenure:formdata.tenure,
-      Frequency:12,
-      EMI:tableme.array[0].EMI,
-      Status:"Pending",
-      ProcessingFee:formdata.processingfee,
-      GST:formdata.gst,
-      InterestType:formdata.loantype,
-      orderValue:formdata.orderValue,
+    console.log('==========================');
 
-      Gurantor:'Gurantor',
-      GID:formdata.gId,
-      Gname:formdata.gName,
-      Gtype:formdata.gType,
-      Gage:formdata.gAge,
-
-      IntroCode:localStorage.getItem("AUID"),
-      Introducer:localStorage.getItem("Name"),
-      Documents:documents,EmpID:'xxxx'
+    try {
+      // POST /loan-requests
+      const res = await axios.post(`${BASE_URL}/loan-requests`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      console.log('[ApplyLoan] POST /loan-requests response:', res.data);
+      toast.success(res.data?.message || 'Loan application submitted successfully!');
+      setformdata(initialFormData);
+      setDocuments([]);
+      settable('');
+    } catch (error) {
+      console.error('[ApplyLoan] POST /loan-requests error:', error);
+      // Log the full error response so we can see exactly what the server says
+      console.error('[ApplyLoan] Server response:', error?.response?.data);
+      console.error('[ApplyLoan] Status:', error?.response?.status);
+      toast.error(
+        error?.response?.data?.message ||
+        error?.response?.data?.error ||
+        JSON.stringify(error?.response?.data) ||
+        error?.message ||
+        'Failed to submit loan application.'
+      );
+    } finally {
+      setSubmitting(false);
+      hideLoader();
     }
-    console.log(data)
-   try {
-    const res= await axios.post("https://api.duniyamart.duniyape.in/create-loan-application/"+"I89nD59Ra69j0ee512TsW143eEt03u",data)
-    console.log(res.data)
-    toast.success("Successful")
-    setformdata(initialFormData)
-    settable('')
-   } catch (error) {
-    console.log(error)
-   }finally{
-    hideLoader()
-   }
-  }
-
-  const [selectedOption, setSelectedOption] = useState("Online");
-
-  const handleChange = (event) => {
-    setSelectedOption(event.target.value);
   };
 
-    return (
-        <div style={container}>
-               <h2 style={{ textAlign: 'center',color: '#b4a383', fontSize: '18px', marginBottom: '20px', position: 'relative' }}>
-          
-          {/* Back Arrow */}
-          <i 
-            className="fa-solid fa-arrow-left"
-            style={{
-              position: 'absolute',
-              left: 0,
-              top: '50%',
-              transform: 'translateY(-50%)',
-              cursor: 'pointer',
-              fontSize: '20px',
-              color: '#b4a383',
-              marginLeft: '10px'
+  const tableHead = ['Sno.', 'EMI', 'Principal', 'Interest', 'Balance'];
+
+  return (
+    <div style={container}>
+      <h2 style={{ textAlign: 'center', color: '#b4a383', fontSize: '18px', marginBottom: '20px', position: 'relative' }}>
+        <i
+          className="fa-solid fa-arrow-left"
+          style={{
+            position: 'absolute', left: 0, top: '50%',
+            transform: 'translateY(-50%)', cursor: 'pointer',
+            fontSize: '20px', color: '#b4a383', marginLeft: '10px',
+          }}
+          onClick={() => window.history.back()}
+        />
+        Loan Application
+      </h2>
+
+      <form onSubmit={Create}>
+
+        {/* ── Branch ── */}
+        <div style={{ marginBottom: '16px' }}>
+          <label style={labelStyle}>Branch <span style={{ color: 'red' }}>*</span></label>
+          <select
+            required
+            value={formdata.branch}
+            onChange={(e) => {
+              const sel = branches.find((b) => String(b._id || b.BranchCode || '') === e.target.value);
+              setformdata((p) => ({
+                ...p,
+                branch: e.target.value,
+                branchName: sel ? (sel.BranchName || sel.branchName || sel.name || '') : '',
+              }));
             }}
-            onClick={() => window.history.back()} // Or use your custom navigate(-1) if using React Router
-          ></i>Loan Application
-          </h2>
-          <form onSubmit={Create}>
-          <div style={{ marginBottom: '16px' }}>
-        <label style={labelStyle}>Member ID</label>
-        <input required
-          value={formdata.memberId}
-          onChange={(e) => setformdata({ ...formdata, memberId: e.target.value })}
-          type="text"
-          placeholder="Enter member ID"
-          style={inputStyle}
-        />
-      </div>
-      <button type='button' onClick={()=>getmemberdata()} style={buttonStyle}>Fetch Member Data</button>
-
-          <div style={{ marginBottom: '16px' }}>
-        <label style={labelStyle}>Member Name</label>
-        <input required
-          value={formdata.memberName}
-          // onChange={(e) => setformdata({ ...formdata, memberName: e.target.value })}
-          type="text"
-          placeholder="Member Name"
-          style={inputStyle}
-        />
-      </div>
-
-          <div style={{ marginBottom: '16px' }}>
-        <label style={labelStyle}>Gurantor ID</label>
-        <input required
-          value={formdata.gId}
-          onChange={(e) => setformdata({ ...formdata, gId: e.target.value })}
-          type="text"
-          placeholder="Enter gurantor ID"
-          style={inputStyle}
-        />
-      </div>
-      <button type='button' onClick={()=>getguarantordata()} style={buttonStyle}>Fetch Gurantor Data</button>
-          <div style={{ marginBottom: '16px' }}>
-        <label style={labelStyle}>Gurantor Name</label>
-        <input required
-          value={formdata.gName}
-          // onChange={(e) => setformdata({ ...formdata, gName: e.target.value })}
-          type="text"
-          placeholder="Gurantor Name"
-          style={inputStyle}
-        />
-      </div>
-
-      <div  style={formItem}>
-                <label style={labelStyle}>Loan Name</label>
-                  <select required
-                    value={formdata.loanName}
-                    // onChange={(e) => setformdata({ ...formdata, loanName: e.target.value })}
-                    style={inputStyle}
-                  >
-                    <option value="">Select</option>
-                    {loan.map((opt, i) => (
-                      <option key={i} value={opt.Code}>{opt.Product}</option>
-                    ))}
-                  </select>
-          </div>
-
-          <div style={{ marginBottom: '16px' }}>
-            <label style={labelStyle}>Order Type</label>
-
-      <label>
-        <input
-          type="radio"
-          value="Online"
-          checked={selectedOption === "Online"}
-          onChange={handleChange}
-          style={{marginRight:5}}
-        />
-        Online
-      </label>
-
-      <label style={{ marginLeft: "10px" }}>
-        <input
-          type="radio"
-          value="Offline"
-          checked={selectedOption === "Offline"}
-          onChange={handleChange}
-          style={{marginRight:5}}
-        />
-        Offline
-      </label>
-            </div>
-
-         { selectedOption==='Online'&&<>
-          <div style={{ marginBottom: '16px' }}>
-        <label style={labelStyle}>Order ID</label>
-        <input required
-          value={formdata.orderid}
-          onChange={(e) => setformdata({ ...formdata, orderid: e.target.value })}
-          type="text"
-          placeholder="Enter order ID"
-          style={inputStyle}
-        />
-      </div>
-      <button type='button' onClick={()=>getorder()} style={buttonStyle}>Fetch Amount</button>
-      </>}
-
-      
-
-     {  selectedOption==='Online'?   <div style={{ marginBottom: '16px' }}>
-        <label style={labelStyle}>Loan Amount</label>
-        <input required
-          value={formdata.loanAmount}
-          // onChange={(e) => setformdata({ ...formdata, loanAmount: e.target.value })}
-          type="number"
-          placeholder="Amount"
-          style={inputStyle}
-        />
-      </div>:<>
-
-<div style={{ marginBottom: '16px' }}>
-        <label style={labelStyle}>Order Value</label>
-        <input required
-          value={formdata.orderValue}
-          onChange={(e) => setformdata({ ...formdata, orderValue: e.target.value })}
-          type="number"
-          placeholder="Amount"
-          style={inputStyle}
-        />
-      </div>
-
-          <div style={{ marginBottom: '16px' }}>
-        <label style={labelStyle}>Loan Amount</label>
-        <input required
-          value={formdata.loanAmount}
-          onChange={(e) => setformdata({ ...formdata, loanAmount: e.target.value })}
-          type="number"
-          placeholder="Amount"
-          style={inputStyle}
-        />
-      </div></>}
-
-      <div  style={formItem}>
-                <label style={labelStyle}>Interest Type</label>
-                  <select required
-                    value={formdata.loantype}
-                    onChange={(e) => setformdata({ ...formdata, loantype: e.target.value })}
-                    style={inputStyle}
-                  >
-                    <option >Flat</option>
-                    <option >Reducing</option>
-                      
-                  </select>
-          </div>
-
-
-      <div style={{ marginBottom: '16px' }}>
-        <label style={labelStyle}>Tenure</label>
-        <input required
-          value={formdata.tenure}
-          onChange={(e) => setformdata({ ...formdata, tenure: e.target.value })}
-          type="number"
-          placeholder="Tenure"
-          style={inputStyle}
-        />
-      </div>
-
-      <div style={{ marginBottom: '16px' }}>
-        <label style={labelStyle}>ROI(%)</label>
-        <input required
-          value={formdata.interest}
-          onChange={(e) => setformdata({ ...formdata, interest: e.target.value })}
-          type="number"
-          placeholder="ROI"
-          style={inputStyle}
-        />
-      </div>
-      {/* <div style={{ marginBottom: '16px' }}>
-        <label style={labelStyle}>EMI</label>
-        <input required
-          value={formdata.introducerid}
-          onChange={(e) => setformdata({ ...formdata, introducerid: e.target.value })}
-          type="text"
-          placeholder="Enter member ID"
-          style={inputStyle}
-        />
-      </div> */}
-          <button type='button' onClick={sadule} style={buttonStyle}>View Schedule</button>
-{table&&<table style={{width:'100%',borderCollapse:'collapse',background:"#eeeeee6b"}}>
-      <thead>
-        <tr style={{background:"#d4d4d4"}}>
-        {state.tableHead.map(item=>(<th key={item} style={{padding:5}}>{item}</th>))}
-        </tr>
-      </thead>
-      <tbody style={{textAlign:"center"}}>
-        {table.array&&table.array.map((item,index)=>(<tr key={index}>
-          <td style={{padding:5}}>{index+1}</td>
-          <td style={{padding:5}}>{item.EMI}</td>
-          <td style={{padding:5}}>{item.Amt}</td>
-          <td style={{padding:5}}>{item.Int}</td>
-          <td style={{padding:5}}>{item.Bal}</td>
-        </tr>))}
-        <tr style={{background:"#d4d4d4"}}>
-          <td style={{padding:5}}>Total</td>
-          <td style={{padding:5}}></td>
-          <td style={{padding:5}}>{table.TotalAmt}</td>
-          <td style={{padding:5}}>{table.TotalInt}</td>
-          <td style={{padding:5}}></td>
-        </tr>
-
-      </tbody>
-    </table>}
-
-
-      <div  style={formItem}>
-                <label style={labelStyle}>Document Type</label>
-                  <select required
-                    value={formdata.Doctype}
-                    onChange={(e) => setformdata({ ...formdata, Doctype: e.target.value })}
-                    style={inputStyle}
-                  >
-                    <option >Aadhar</option>
-                    <option >Bank Statement</option>
-                  </select>
-          </div>
-      <div style={{ marginBottom: '16px' }}>
-        <label style={labelStyle}>Upload Document</label>
-        <input required
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => {
-                      const file = e.target.files[0];
-                      if (file) {
-                        handleAddDocument(file)
-                      }
-                    }}
-                    style={inputStyle}
-                  />
-      </div>
-
-          <button type='submit' style={buttonStyle}>Apply</button>
-          </form>
+            style={inputStyle}
+          >
+            <option value="">-- Select Branch --</option>
+            {branches.map((b, i) => {
+              const bid = String(b._id || b.BranchCode || i);
+              const bname = b.BranchName || b.branchName || b.name || bid;
+              return <option key={bid} value={bid}>{bname}</option>;
+            })}
+          </select>
         </div>
-      )}
 
-export default ApplyLoan
+        {/* ── Loan Product ── */}
+        <div style={{ marginBottom: '16px' }}>
+          <label style={labelStyle}>Loan Product <span style={{ color: 'red' }}>*</span></label>
+          <select
+            required
+            value={formdata.loanProductId}
+            onChange={(e) => {
+              const sel = loanProducts.find((p) => String(p._id || p.id || '') === e.target.value);
+              setformdata((p) => ({
+                ...p,
+                loanProductId: e.target.value,
+                loanName: sel ? (sel.ProductName || sel.productName || sel.name || '') : '',
+                interest: sel?.roi || sel?.interestRate || sel?.rateOfInterest || p.interest,
+                tenure: sel?.tenure || sel?.loanTenure || p.tenure,
+              }));
+            }}
+            style={inputStyle}
+          >
+            <option value="">-- Select Loan Product --</option>
+            {loanProducts.map((p, i) => {
+              const pid = String(p._id || p.id || i);
+              const pname = p.ProductName || p.productName || p.name || pid;
+              return <option key={pid} value={pid}>{pname}</option>;
+            })}
+          </select>
+        </div>
+
+        {/* ── Member ID ── */}
+        <div style={{ marginBottom: '16px' }}>
+          <label style={labelStyle}>Member ID <span style={{ color: 'red' }}>*</span></label>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <input
+              required
+              value={formdata.memberId}
+              onChange={(e) => setformdata((p) => ({ ...p, memberId: e.target.value, memberName: '', memberAge: '', memberType: '' }))}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); getmemberdata(); } }}
+              type="text"
+              placeholder="Enter member ID then press Enter"
+              style={{ ...inputStyle, flex: 1 }}
+            />
+            <button type="button" onClick={getmemberdata} style={{ ...buttonStyle, width: 'auto', padding: '10px 16px', marginBottom: 0 }}>
+              🔍
+            </button>
+          </div>
+        </div>
+
+        {/* ── Member Info (auto-filled) ── */}
+        {formdata.memberName ? (
+          <div style={{ marginBottom: '16px', padding: '10px 14px', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: '6px', fontSize: '12px', color: '#166534', fontWeight: 600 }}>
+            ✅ {formdata.memberName} | Type: {formdata.memberType} | Age: {formdata.memberAge}
+          </div>
+        ) : null}
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', marginBottom: '16px' }}>
+          {[
+            { label: 'Member Name', field: 'memberName', readOnly: true },
+            { label: 'Member Type', field: 'memberType', readOnly: true },
+            { label: 'Age', field: 'memberAge', readOnly: true },
+          ].map(({ label, field, readOnly }) => (
+            <div key={field} style={formItem}>
+              <label style={labelStyle}>{label}</label>
+              <input readOnly={readOnly} value={formdata[field] || ''} type="text" style={{ ...inputStyle, background: readOnly ? '#f3f4f6' : undefined }} />
+            </div>
+          ))}
+        </div>
+
+        {/* ── Guarantor ID ── */}
+        <div style={{ marginBottom: '16px' }}>
+          <label style={labelStyle}>Guarantor ID</label>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <input
+              value={formdata.gId}
+              onChange={(e) => setformdata((p) => ({ ...p, gId: e.target.value, gName: '', gAge: '', gType: '' }))}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); getguarantordata(); } }}
+              type="text"
+              placeholder="Enter guarantor ID then press Enter"
+              style={{ ...inputStyle, flex: 1 }}
+            />
+            <button type="button" onClick={getguarantordata} style={{ ...buttonStyle, width: 'auto', padding: '10px 16px', marginBottom: 0 }}>
+              🔍
+            </button>
+          </div>
+        </div>
+
+        {formdata.gName ? (
+          <div style={{ marginBottom: '16px', padding: '10px 14px', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: '6px', fontSize: '12px', color: '#166534', fontWeight: 600 }}>
+            ✅ Guarantor: {formdata.gName} | Type: {formdata.gType} | Age: {formdata.gAge}
+          </div>
+        ) : null}
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', marginBottom: '16px' }}>
+          {[
+            { label: 'Guarantor Name', field: 'gName', readOnly: true },
+            { label: 'Guarantor Type', field: 'gType', readOnly: true },
+            { label: 'Guarantor Age', field: 'gAge', readOnly: true },
+          ].map(({ label, field, readOnly }) => (
+            <div key={field} style={formItem}>
+              <label style={labelStyle}>{label}</label>
+              <input readOnly={readOnly} value={formdata[field] || ''} type="text" style={{ ...inputStyle, background: readOnly ? '#f3f4f6' : undefined }} />
+            </div>
+          ))}
+        </div>
+
+        {/* ── Loan Details ── */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', marginBottom: '16px' }}>
+
+          <div style={formItem}>
+            <label style={labelStyle}>Loan Amount <span style={{ color: 'red' }}>*</span></label>
+            <input required value={formdata.loanAmount} onChange={(e) => setformdata((p) => ({ ...p, loanAmount: e.target.value }))} type="number" placeholder="Amount" style={inputStyle} />
+          </div>
+
+          <div style={formItem}>
+            <label style={labelStyle}>Interest Type</label>
+            <select value={formdata.loantype} onChange={(e) => setformdata((p) => ({ ...p, loantype: e.target.value }))} style={inputStyle}>
+              <option value="Flat">Flat</option>
+              <option value="Reducing">Reducing</option>
+            </select>
+          </div>
+
+          <div style={formItem}>
+            <label style={labelStyle}>Tenure (months)</label>
+            <input required value={formdata.tenure} onChange={(e) => setformdata((p) => ({ ...p, tenure: e.target.value }))} type="number" placeholder="Tenure" style={inputStyle} />
+          </div>
+
+          <div style={formItem}>
+            <label style={labelStyle}>ROI (%)</label>
+            <input required value={formdata.interest} onChange={(e) => setformdata((p) => ({ ...p, interest: e.target.value }))} type="number" placeholder="ROI" style={inputStyle} step="0.01" />
+          </div>
+
+          <div style={formItem}>
+            <label style={labelStyle}>EMI (Auto-calculated)</label>
+            <input readOnly value={formdata.emi || ''} type="text" placeholder="EMI" style={{ ...inputStyle, background: '#f3f4f6', fontWeight: 700, color: '#385FBF' }} />
+          </div>
+
+          <div style={formItem}>
+            <label style={labelStyle}>Loan Purpose</label>
+            <input value={formdata.loanPurpose || ''} onChange={(e) => setformdata((p) => ({ ...p, loanPurpose: e.target.value }))} type="text" placeholder="Purpose" style={inputStyle} />
+          </div>
+
+        </div>
+
+        {/* ── EMI Schedule ── */}
+        <button type="button" onClick={sadule} style={buttonStyle}>View EMI Schedule</button>
+
+        {table && (
+          <div style={{ overflowX: 'auto', marginBottom: 20 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', background: '#eeeeee6b' }}>
+              <thead>
+                <tr style={{ background: '#d4d4d4' }}>
+                  {tableHead.map((h) => <th key={h} style={{ padding: 5 }}>{h}</th>)}
+                </tr>
+              </thead>
+              <tbody style={{ textAlign: 'center' }}>
+                {table.array.map((item, idx) => (
+                  <tr key={idx}>
+                    <td style={{ padding: 5 }}>{idx + 1}</td>
+                    <td style={{ padding: 5 }}>{item.EMI}</td>
+                    <td style={{ padding: 5 }}>{item.Amt}</td>
+                    <td style={{ padding: 5 }}>{item.Int}</td>
+                    <td style={{ padding: 5 }}>{item.Bal}</td>
+                  </tr>
+                ))}
+                <tr style={{ background: '#d4d4d4', fontWeight: 700 }}>
+                  <td style={{ padding: 5 }}>Total</td>
+                  <td style={{ padding: 5 }}>{table.TotalAmt}</td>
+                  <td colSpan="3" style={{ padding: 5 }}>Interest: {table.TotalInt}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* ── Document Upload ── */}
+        <div style={formItem}>
+          <label style={labelStyle}>Document Type</label>
+          <select value={formdata.Doctype} onChange={(e) => setformdata((p) => ({ ...p, Doctype: e.target.value }))} style={inputStyle}>
+            <option>Aadhar</option>
+            <option>Bank Statement</option>
+            <option>PAN Card</option>
+            <option>Other</option>
+          </select>
+        </div>
+
+        <div style={{ marginBottom: '16px' }}>
+          <label style={labelStyle}>Upload Document</label>
+          <input
+            type="file"
+            accept="image/*,application/pdf"
+            onChange={(e) => { const file = e.target.files[0]; if (file) handleAddDocument(file); e.target.value = ''; }}
+            style={inputStyle}
+          />
+        </div>
+
+        {/* Show uploaded docs */}
+        {documents.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <label style={labelStyle}>Uploaded Documents ({documents.length})</label>
+            {documents.map((doc, idx) => (
+              <div key={doc.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 10px', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 6, marginBottom: 6, fontSize: 13 }}>
+                <span>📄 <strong>{doc.name}</strong> — {doc.fileName}</span>
+                <button type="button" onClick={() => setDocuments((p) => p.filter((d) => d.id !== doc.id))} style={{ background: 'none', border: 'none', color: 'red', cursor: 'pointer', fontSize: 16 }}>✕</button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <button type="submit" disabled={submitting} style={{ ...buttonStyle, opacity: submitting ? 0.7 : 1 }}>
+          {submitting ? 'Submitting...' : 'Apply for Loan'}
+        </button>
+      </form>
+    </div>
+  );
+};
+
+export default ApplyLoan;
 
 const container = {
   maxWidth: '800px',
@@ -619,13 +684,13 @@ const container = {
   borderRadius: '10px',
   boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
   fontFamily: 'Arial, sans-serif',
-}
+};
 
 const labelStyle = {
   display: 'block',
   marginBottom: '6px',
   fontWeight: 'bold',
-  color:'#b4a383'
+  color: '#b4a383',
 };
 
 const inputStyle = {
@@ -633,7 +698,7 @@ const inputStyle = {
   padding: '10px',
   borderRadius: '6px',
   border: '1px solid #b4a383',
-  onfocus:"#b4a383"
+  boxSizing: 'border-box',
 };
 
 const buttonStyle = {
@@ -644,11 +709,12 @@ const buttonStyle = {
   border: 'none',
   borderRadius: '6px',
   fontWeight: 'bold',
-  // fontSize: '16px',
   marginBottom: '20px',
+  cursor: 'pointer',
 };
+
 const formItem = {
   flex: '1 1 48%',
   minWidth: '250px',
-  marginBottom:16
+  marginBottom: 16,
 };
