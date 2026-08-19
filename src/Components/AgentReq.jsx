@@ -8,63 +8,69 @@ const AgentReq = ({ uid }) => {
   const [data, setData] = useState([]);
   const [list, setList] = useState([]);
   const { showLoader, hideLoader } = useLoader();
-  
 
-    const getApiData = async () => {
-      showLoader();
-      try {
-        const res = await axios.get(`${BASE_URL}/agent-requests`);
-        let rawAgents = [];
-        if (Array.isArray(res.data))               rawAgents = res.data;
-        else if (Array.isArray(res.data?.data))    rawAgents = res.data.data;
-        else if (Array.isArray(res.data?.requests)) rawAgents = res.data.requests;
+  const [members, setMembers] = useState([]);
 
-        // Log the raw data so we can see what's coming from the backend
-        console.log('[AgentReq] Raw API data:', rawAgents);
-        console.log('[AgentReq] Current logged-in UID:', uid);
+  const getApiData = async () => {
+    showLoader();
+    try {
+      // 1. Fetch the members list so we can resolve names if they are null
+      const memRes = await axios.get(`${BASE_URL}/get-members`).catch(() => ({ data: [] }));
+      const memList = Array.isArray(memRes.data) ? memRes.data : (memRes.data?.data || []);
+      setMembers(memList);
 
-        // Filter by introducer UID (if uid exists)
-        const filteredData = rawAgents.filter(item => {
-          const intro = String(
-            item.agent_code || item.agentCode || item.AgentCode ||
-            item.introducer_code || item.IntroCode || ''
-          ).toLowerCase();
-          
-          // Debug each item
-          console.log(`[AgentReq] Checking request ${item._id || item.id} -> Intro: ${intro} === UID: ${String(uid).toLowerCase()} ?`);
-          
-          // Fallback: if no UID is set, or if we want to show all for testing, we can adjust this.
-          // For now, let's keep the filter but allow it if intro is empty just in case? 
-          // No, let's strictly match but return everything if we are debugging.
-          return intro === String(uid).toLowerCase() || String(uid).toLowerCase() === 'admin';
-        });
-        
-        console.log('[AgentReq] Filtered data for this agent:', filteredData);
-        setData(filteredData);
-      } catch (error) {
-        console.error('Error fetching data:', error);
-      } finally {
-        hideLoader();
-      }
-    };
+      // 2. Fetch agent requests
+      const targetApiUrl = `${BASE_URL}/agent-requests`;
+      console.log("Agent API URL:", targetApiUrl);
+      const res = await axios.get(targetApiUrl);
+      
+      const rawAgents = res.data?.data || res.data?.requests || res.data || [];
+      console.log('[AgentReq] Fetched all requests:', rawAgents);
+      
+      setData(rawAgents);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+    } finally {
+      hideLoader();
+    }
+  };
 
   useEffect(() => {
     getApiData();
   }, [uid]);
 
+  const getEffectiveStatus = (raw) => {
+    const s = (
+      raw?.status ||
+      raw?.Status ||
+      raw?.request_status ||
+      raw?.approval_status ||
+      raw?.agentStatus ||
+      'pending'
+    ).toString().toLowerCase();
+    if (['approved', 'accepted', 'active', 'verified', '1', 'true'].includes(s)) return 'approved';
+    if (['rejected', 'declined', 'false', '0'].includes(s)) return 'rejected';
+    return 'pending';
+  };
+
   useEffect(() => {
     const filteredData = data
       .filter((item) => {
-        const s = String(item.status || item.Status || 'pending').toLowerCase();
+        const s = getEffectiveStatus(item);
         return s === filter.toLowerCase();
       })
-      .sort((a, b) => new Date(b.date) - new Date(a.date));
+      .sort((a, b) => {
+        const d1 = new Date(a.date || a.createdAt || a.created_at || 0);
+        const d2 = new Date(b.date || b.createdAt || b.created_at || 0);
+        return d2 - d1;
+      });
     setList(filteredData);
+    console.log(`[AgentReq] Tab: ${filter}, Found:`, filteredData);
   }, [filter, data]);
 
   return (
     <div style={{ width: '100%', backgroundColor: 'white', padding: '20px 0' }}>
-     <label>Status</label>
+      <label>Status</label>
       <select
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
@@ -87,20 +93,46 @@ const AgentReq = ({ uid }) => {
         <tbody>
           {list.length === 0 ? (
             <tr>
-              <td colSpan="4" style={{...styles.cell, padding: '20px', color: '#888'}}>
+              <td colSpan="4" style={{ ...styles.cell, padding: '20px', color: '#888' }}>
                 No {filter} agent requests found.
               </td>
             </tr>
           ) : (
             list.map((item, index) => {
-              const date = item.date || item.createdAt || '-';
-              const code = item.member_code || item.MemberCode || item.memberId || '-';
-              const name = item.member_name || item.memberName || item.name || '-';
+              let date = item.date || item.createdAt || item.created_at || '-';
+              if (date !== '-') {
+                try {
+                  date = new Date(date).toLocaleDateString('en-GB', {
+                    day: '2-digit', month: 'short', year: 'numeric'
+                  });
+                } catch (e) {
+                  // ignore
+                }
+              }
+              // Prioritize human-readable memberId first, fallback to mongo member_id
+              const code = item.memberId || item.MemberId || item.member_code || item.memberCode || item.MemberCode || item.member_id || '-';
               
+              // Resolve name from the item itself, or look it up in the members list we just fetched!
+              let name = item.memberName || item.member_name || item.MemberName || item.name || '';
+              if (!name) {
+                const foundMem = members.find(m => 
+                  String(m.memberId) === String(item.memberId) || 
+                  String(m._id) === String(item.member_id) || 
+                  String(m.id) === String(item.member_id)
+                );
+                if (foundMem) {
+                  name = `${foundMem.FirstName || foundMem.firstname || ''} ${foundMem.LastName || foundMem.lastname || ''}`.trim() || foundMem.MemberName;
+                }
+              }
+              name = name || 'N/A';
+
+              // agentCode or agent_code if available, otherwise it's pending so they don't have one yet.
+              const agentId = item.agentCode || item.agent_code || item.AgentCode || '-';
+
               return (
-                <tr key={item._id || item.id || index} style={styles.row}>
+                <tr key={item._id || item.request_id || item.id || index} style={styles.row}>
                   <td style={styles.cell}>{date}</td>
-                  <td style={styles.cell}>-</td>
+                  <td style={styles.cell}>{agentId}</td>
                   <td style={styles.cell}>{code}</td>
                   <td style={styles.cell}>{name}</td>
                 </tr>
