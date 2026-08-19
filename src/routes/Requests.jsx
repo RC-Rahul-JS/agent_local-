@@ -2,20 +2,18 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Tab, Tabs, TabList, TabPanel } from 'react-tabs';
 import 'react-tabs/style/react-tabs.css';
-import { database } from '../DB/Firebase';
-import { getDatabase, ref, query, orderByChild, equalTo, get, onValue, off } from "firebase/database";
+import axios from 'axios';
+import { BASE_URL } from '../config/api';
 import AgentReq from '../Components/AgentReq';
 import LoanReq from '../Components/LoanReq';
 import { useLoader } from '../loader/LoaderContext';
 
 
+// Main Requests Component
 const Requests = () => {
   const navigate = useNavigate();
   const [index, setIndex] = useState(0);
   const [UID, setUID] = useState(null);
-  const [userdata, setuserdata] = useState(null);
-  const { showLoader, hideLoader } = useLoader();
-  
 
   useEffect(() => {
     const value = localStorage.getItem('AUID');
@@ -24,83 +22,44 @@ const Requests = () => {
     }
   }, []);
 
-//   useEffect(() => {
-//     if (UID) {
-//       const transitionRef = ref(database, `/Agent/Agents/${UID}/`);
-//       const unsubscribe = onValue(transitionRef, (snapshot) => {
-//         const data = snapshot.val();
-//         if (data) {
-//           setuserdata(data);
-//         }
-//       });
-  
-//       return () => {
-//         off(transitionRef); // remove listener when component unmounts
-//       };
-//     }
-//   }, [UID]);
-
-    const getApiData = async () => {
-      if (!UID) return; // Don't fetch if UID isn't loaded yet
-      showLoader()
-      try {
-        const dataRef = ref(database, `/Agent/Agents/${UID}/`);
-          const snapshot = await get(dataRef);
-      
-          if (snapshot.exists()) {
-            setuserdata(snapshot.val());
-          } else {
-            console.log('No data available');
-          }
-        } catch (error) {
-          console.error('Error fetching data:', error);
-        } finally{
-          hideLoader()
-        }
-      };
-  
-    useEffect(() => {
-      getApiData();
-    }, [UID]);
-
   return (
     <>
       <div style={{ padding: '20px' }}>
-                 <h2 style={{ textAlign: 'center', color: '#b4a383', fontSize: '18px', marginBottom: '20px', position: 'relative' }}>
-  
-            {/* Back Arrow */}
-            <i 
-                className="fa-solid fa-arrow-left"
-                style={{
-                position: 'absolute',
-                left: 0,
-                top: '50%',
-                transform: 'translateY(-50%)',
-                cursor: 'pointer',
-                fontSize: '20px',
-                color: '#b4a383',
-                marginLeft: '10px'
-                }}
-                onClick={() => navigate('/')} 
-            ></i>Requests
-            </h2>
-          <Tabs selectedIndex={index} onSelect={setIndex}>
-            <TabList style={{ display: 'flex', width: '100%' ,color:'#b4a383',fontSize:14,fontWeight:600}}>
-                <Tab style={{ flex: 1, textAlign: 'center' }}>Member Req.</Tab>
-                <Tab style={{ flex: 1, textAlign: 'center' }}>Loan Req.</Tab>
-                <Tab style={{ flex: 1, textAlign: 'center' }}>Agent Req.</Tab>
-            </TabList>
+        <h2 style={{ textAlign: 'center', color: '#b4a383', fontSize: '18px', marginBottom: '20px', position: 'relative' }}>
 
-            <TabPanel>
-              <Requestsx memberId={userdata?.mdata?.CustomerCode || userdata?.MemberId || UID} />
-            </TabPanel>
-            <TabPanel>
-              <LoanReq uid={UID} />
-            </TabPanel>
-            <TabPanel>
-              <AgentReq uid={UID} />
-            </TabPanel>
-          </Tabs>
+          {/* Back Arrow */}
+          <i
+            className="fa-solid fa-arrow-left"
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              cursor: 'pointer',
+              fontSize: '20px',
+              color: '#b4a383',
+              marginLeft: '10px'
+            }}
+            onClick={() => navigate('/')}
+          ></i>Requests
+        </h2>
+        <Tabs selectedIndex={index} onSelect={setIndex}>
+          <TabList style={{ display: 'flex', width: '100%', color: '#b4a383', fontSize: 14, fontWeight: 600 }}>
+            <Tab style={{ flex: 1, textAlign: 'center' }}>Member Req.</Tab>
+            <Tab style={{ flex: 1, textAlign: 'center' }}>Loan Req.</Tab>
+            <Tab style={{ flex: 1, textAlign: 'center' }}>Agent Req.</Tab>
+          </TabList>
+
+          <TabPanel>
+            <Requestsx memberId={UID} />
+          </TabPanel>
+          <TabPanel>
+            <LoanReq uid={UID} />
+          </TabPanel>
+          <TabPanel>
+            <AgentReq uid={UID} />
+          </TabPanel>
+        </Tabs>
       </div>
     </>
   );
@@ -116,36 +75,52 @@ const Requestsx = ({ memberId }) => {
   const { showLoader, hideLoader } = useLoader();
 
   const getApiData = async () => {
-    showLoader()
+    if (!memberId) return;
+    showLoader();
     try {
-      const dataRef = ref(database, 'Requests/AccountsRequest');
-      const snapshot = await get(dataRef);
-  
-      if (snapshot.exists()) {
-          const allData = Object.values(snapshot.val() || {});
-          const filteredData = allData.filter(item => item.MemberId === memberId);
-          console.log(allData)
-        setdata(filteredData);
-      } else {
-        console.log('No data available');
-      }
+      const res = await axios.get(`${BASE_URL}/member-requests`);
+      console.log('[Requestsx] Raw API Data:', res.data);
+
+
+      let allData = [];
+      if (Array.isArray(res.data)) allData = res.data;
+      else if (Array.isArray(res.data?.data)) allData = res.data.data;
+      else if (Array.isArray(res.data?.requests)) allData = res.data.requests;
+
+      // Filter to show member requests created by THIS Agent
+      const filteredData = allData.filter(item => {
+        const intro = String(
+          item.AgentCode || item.agentCode || item.agent_code ||
+          item.IntroCode || item.introducer_code || item.member_code || ''
+        ).toLowerCase();
+        const myId = String(memberId).toLowerCase();
+        return intro === myId;
+      });
+
+      console.log('[Requestsx] Raw API Member Requests:', allData);
+      console.log('[Requestsx] Filtered for this Agent:', filteredData);
+      setdata(filteredData);
     } catch (error) {
-      console.error('Error fetching data:', error);
+      console.error('Error fetching member requests:', error);
     } finally {
-        hideLoader()
+      hideLoader();
     }
   };
 
 
   useEffect(() => {
     getApiData();
-  }, []);
+  }, [memberId]);
 
   useEffect(() => {
-    const filteredData = data.filter(item => item.Status === filter)
+    const filteredData = data.filter(item => {
+      const s = String(item.Status || item.status || 'Request').toLowerCase();
+      return s === filter.toLowerCase();
+    })
       .sort((a, b) => new Date(b.ReceiptDate) - new Date(a.ReceiptDate));
+
     setlist(filteredData);
-    console.log(filteredData)
+    console.log('[Requestsx] Status Filtered List:', filteredData);
   }, [filter, data]);
 
   return (
@@ -187,10 +162,10 @@ const TableWithFlatList = ({ list }) => {
         fontWeight: 'bold',
         padding: '10px 0',
       }}>
-        <div style={{ flex: 1, textAlign: 'center', fontSize: '14px'}}>S.No</div>
-        <div style={{ flex: 1, textAlign: 'center', fontSize: '14px'}}>Date</div>
-        <div style={{ flex: 1, textAlign: 'center', fontSize: '14px'}}>Name</div>
-        <div style={{ flex: 1, textAlign: 'center', fontSize: '14px'}}>Share</div>
+        <div style={{ flex: 1, textAlign: 'center', fontSize: '14px' }}>S.No</div>
+        <div style={{ flex: 1, textAlign: 'center', fontSize: '14px' }}>Date</div>
+        <div style={{ flex: 1, textAlign: 'center', fontSize: '14px' }}>Name</div>
+        <div style={{ flex: 1, textAlign: 'center', fontSize: '14px' }}>Share</div>
       </div>
 
       {/* Table Rows */}
@@ -207,7 +182,7 @@ const TableWithFlatList = ({ list }) => {
           <div style={{ flex: 1, textAlign: 'center', fontSize: '12px' }}>{index + 1}</div>
           <div style={{ flex: 1, textAlign: 'center', fontSize: '12px' }}>{item.ReceiptDate}</div>
           <div style={{ flex: 1, textAlign: 'center', fontSize: '12px' }}>{item.FirstName} {item.LastName}</div>
-          <div style={{ flex: 1, textAlign: 'center', fontSize: '12px', color:item.share?'':'red' }}>{item.share?item.share:'Membership Fee Pending'}</div>
+          <div style={{ flex: 1, textAlign: 'center', fontSize: '12px', color: item.share ? '' : 'red' }}>{item.share ? item.share : 'Membership Fee Pending'}</div>
         </div>
       ))}
     </div>
