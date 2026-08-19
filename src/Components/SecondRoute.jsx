@@ -9,6 +9,7 @@ import UploadFile from "./UploadFile";
 import { useLoader } from "../loader/LoaderContext";
 import { toast } from "react-toastify";
 import axios from "axios";
+import { BASE_URL } from "../config/api";
 
 const WalletScreen = () => {
   const transactions = [
@@ -79,28 +80,50 @@ useEffect(() => {
   useEffect(() => {
     if (!UID) return;
 
-    const q = query(
-      ref(database, '/creditlimit/accounts/'),
-      orderByChild('agentid'),
-      equalTo(UID)
-    );
+    const fetchWalletDetails = async () => {
+      try {
+        // First, get the wallet list to find the wallet_id for the current agent
+        const listRes = await axios.get(`${BASE_URL}/wallet/list`);
+        const wallets = listRes.data?.data || [];
+        
+        // Find wallet matching the current UID (agentCode)
+        const match = wallets.find(w => 
+          (w.agentCode || '').toLowerCase() === UID.toLowerCase() ||
+          (w.agent_id || '').toLowerCase() === UID.toLowerCase()
+        );
 
-    const handleData = (snapshot) => {
-      const data = snapshot.val();
-      console.log(data)
-      if (data) {
-        const userData = Object.values(data)[0];
-        setuserdata(userData);
-        const calculatedAmount = (userData.Amount - userData.Balance).toFixed(2);
-        setamount(calculatedAmount);
-        console.log(userData)
+        if (match) {
+          // Now fetch the exact wallet details
+          const detailsRes = await axios.get(`${BASE_URL}/wallet/details?wallet_id=${match._id}`);
+          if (detailsRes.data && detailsRes.data.success && detailsRes.data.data?.wallet) {
+            const w = detailsRes.data.data.wallet;
+            
+            // Map the API fields to the old Firebase logic expected by the UI
+            const mappedData = {
+              ...w,
+              Amount: w.creditLimit || 0,
+              Balance: w.availableCredit || 0,
+              MemberName: w.agentName || w.MemberName || '',
+              LoanCode: w.walletNumber || w.LoanCode || '',
+              BranchCode: w.branchCode || w.BranchCode || '',
+            };
+            
+            setuserdata(mappedData);
+            
+            // calculate the allowed deposit amount (Total Limit - Current Balance)
+            const calculatedAmount = (mappedData.Amount - mappedData.Balance).toFixed(2);
+            setamount(calculatedAmount);
+            console.log("Mapped Wallet Data:", mappedData);
+          }
+        } else {
+          console.warn('No wallet found for agent:', UID);
+        }
+      } catch (error) {
+        console.error('Error fetching wallet details:', error);
       }
     };
 
-    onValue(q, handleData);
-
-    // Cleanup listener
-    return () => off(q, 'value', handleData);
+    fetchWalletDetails();
   }, [UID]);
   
   useEffect(() => {
