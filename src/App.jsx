@@ -18,6 +18,7 @@ import Requests from './routes/Requests'
 import MemberList from './routes/MemberList'
 import MemberDetails from './routes/MemberDetails'
 import AgentHierarchyView from './routes/AgentHierarchyView'
+import AgentList from './routes/AgentList'
 import FirstMembershipFee from './routes/FirstMembershipFee'
 import TPINManager from './routes/TPINManager'
 
@@ -167,6 +168,14 @@ function App() {
           element={
             <PrivateRoute>
               <AgentHierarchyView />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/agentlist"
+          element={
+            <PrivateRoute>
+              <AgentList />
             </PrivateRoute>
           }
         />
