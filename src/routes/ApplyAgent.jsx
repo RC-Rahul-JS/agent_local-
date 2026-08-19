@@ -267,6 +267,22 @@ const ApplyAgent = () => {
   const Create = async (e) => {
     e.preventDefault();
 
+    // ── Console form data ─────────────────────────────────────────────────────
+    console.log('===== AGENT FORM DATA =====');
+    console.log('memberId       :', formdata.memberId);
+    console.log('memberName     :', formdata.memberName);
+    console.log('memberType     :', formdata.memberType);
+    console.log('memberAge      :', formdata.memberAge);
+    console.log('Designation    :', formdata.Designation);
+    console.log('designation_id :', formdata.designation_id);
+    console.log('branch_id      :', formdata.branch_id);
+    console.log('IntroCode      :', formdata.IntroCode);
+    console.log('IntroName      :', formdata.IntroName);
+    console.log('password       :', formdata.password);
+    console.log('Intro Option   :', selectedOption === 'No' ? 'Self Introduction' : 'Change Introducer');
+    console.log('Full formdata  :', formdata);
+    console.log('===========================');
+
     // ── Validations ──────────────────────────────────────────────────────────
     if (!formdata.memberId.trim())   { toast.error('Member ID is required.');                          return; }
     if (!formdata.mdata)             { toast.error('Please search and select a valid Member first.'); return; }
