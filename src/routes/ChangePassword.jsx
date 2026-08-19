@@ -1,75 +1,90 @@
 import React, { useState, useEffect } from 'react';
-import moment from 'moment';
 import axios from 'axios';
-import { database } from '../DB/Firebase';
-import { child, get, off, onValue, ref, update } from 'firebase/database';
 import { useLoader } from '../loader/LoaderContext';
 import { toast } from 'react-toastify';
+import { BASE_URL } from '../config/api';
 
 const ChangePassword = () => {
     const { showLoader, hideLoader } = useLoader();
     const initialFormData = {
-      mainpass:'',
       old:'',
       confirmpassword: '',
       password: '',
     };
     
-      const [formdata, setformdata] = useState(initialFormData);
-      const [UID, setUID] = useState('');
-      useEffect(() => {
-         setUID(localStorage.getItem("AUID"))
-        }, [])
-    
-      useEffect(() => {
-        if (!UID) return;
-        const agentRef = ref(database, `Agent/Agents/${UID}`);
-        // 1) Listen for agent data
-        onValue(agentRef, (snap) => {
-          const Introdata = snap.val();
-          if (Introdata) {
-            setformdata({...formdata,mainpass:Introdata.password});
-            console.log(Introdata)
+    const [formdata, setformdata] = useState(initialFormData);
+    const [UID, setUID] = useState('');
+    const [agentMongoId, setAgentMongoId] = useState('');
+
+    useEffect(() => {
+        const storedAUID = localStorage.getItem("AUID");
+        setUID(storedAUID || '');
+
+        // Fetch agent's MongoDB _id
+        const fetchAgentId = async () => {
+          if (!storedAUID) return;
+          try {
+            const res = await axios.get(`${BASE_URL}/agents`);
+            const agents = Array.isArray(res.data) ? res.data : (res.data?.data || res.data?.agents || []);
+            const foundAgent = agents.find(a => {
+              const codes = [a.agentCode, a.AgentCode, a.agent_code, a.memberId, a.MemberNo, a.code]
+                .map(v => String(v || '').toLowerCase().trim());
+              return codes.includes(storedAUID.toLowerCase());
+            });
+            if (foundAgent) {
+              setAgentMongoId(String(foundAgent._id?.$oid || foundAgent._id || foundAgent.id || ''));
+            }
+          } catch (err) {
+            console.error('Failed to fetch agent info:', err);
           }
-        });
-    
-        // cleanup
-        return () => {
-          off(agentRef);
         };
-      }, [UID]);
+
+        fetchAgentId();
+    }, []);
     
-      const passwordFormat = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+    const passwordFormat = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
 
+    const Create = async (e) => {
+      e.preventDefault();
 
-  const Create=async(e)=>{
-    e.preventDefault()
-    console.log(formdata)
-    if(formdata.mainpass!==formdata.old){
-        toast.error("Incorrect Old Password")
-        return
-    }else if(formdata.password!==formdata.confirmpassword){
-        toast.error("Password Didn't Match")
-        return
-    }else if (!passwordFormat.test(formdata.password)) {
-        toast.error("Password must include 8 chars, 1 uppercase, 1 lowercase, 1 number & 1 special symbol");
-        return;
-    }
-    showLoader()
-    try {
-        // Update under /Requests/Agent/{memberId}
-        const reqRef = ref(database, `Agent/Agents/${UID}`);
-        await update(reqRef, {password:formdata.password});
-        toast.success("Updated Successfully")
-        setformdata(initialFormData)
-        // Redirect to success page
-        // navigate('/success');
-      } catch (err) {
-        console.error('Failed to create request:', err);
-      }finally{
-        hideLoader()
+      if (!formdata.old) {
+          toast.error("Please enter your old password");
+          return;
+      } else if (formdata.password !== formdata.confirmpassword) {
+          toast.error("Password Didn't Match");
+          return;
+      } else if (!passwordFormat.test(formdata.password)) {
+          toast.error("Password must include 8 chars, 1 uppercase, 1 lowercase, 1 number & 1 special symbol");
+          return;
       }
-  }
+
+      if (!agentMongoId) {
+          toast.error("Agent ID not found. Please try refreshing the page.");
+          return;
+      }
+
+      showLoader();
+      try {
+          const res = await axios.post(`${BASE_URL}/agent/change-password`, {
+              member_id: agentMongoId,
+              old_password: formdata.old,
+              new_password: formdata.password
+          });
+
+          if (res.data && res.data.success) {
+              toast.success("Password Updated Successfully");
+              setformdata(initialFormData);
+          } else {
+              toast.error(res.data?.message || "Failed to update password");
+          }
+      } catch (err) {
+          console.error('Failed to update password:', err);
+          const errorMsg = err.response?.data?.message || err.message || 'Failed to update password';
+          toast.error(errorMsg);
+      } finally {
+          hideLoader();
+      }
+    };
 
     return (
         <div style={container}>
@@ -88,7 +103,7 @@ const ChangePassword = () => {
       color: '#b4a383',
       marginLeft: '10px'
     }}
-    onClick={() => window.history.back()} // Or use your custom navigate(-1) if using React Router
+    onClick={() => window.history.back()} 
   ></i>  Change Password
           </h2>
           <form onSubmit={Create}>
@@ -96,9 +111,7 @@ const ChangePassword = () => {
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px' }}>
 
             {[
-                { label: 'Old Password', name: 'old',type:"password"},
-                // { label: 'Create Password', name: 'password',type:"password"},
-                // { label: 'Confirm Password', name: 'confirmpassword',type:"password"},
+                { label: 'Old Password', name: 'old', type: "password" },
             ].map((field, idx) => (
                 <div key={idx} style={formItem}>
                 <label style={labelStyle}>{field.label}</label>
@@ -111,56 +124,52 @@ const ChangePassword = () => {
                 />
                 </div>
             ))}
-
-           
             </div>
 
+            <div style={formItem}>
+              <label style={labelStyle}>Create Password</label>
+              <input
+                required
+                type="password"
+                value={formdata.password}
+                onChange={(e) => setformdata({ ...formdata, password: e.target.value })}
+                style={inputStyle}
+              />
+
+              {/* Password Rules */}
+              <div style={{ marginTop: 6, fontSize: 12, color: "#444" }}>
+                <p style={{ margin: 0, color: formdata.password.length >= 8 ? "green" : "red" }}>
+                  • Minimum 8 characters
+                </p>
+
+                <p style={{ margin: 0, color: /[A-Z]/.test(formdata.password) ? "green" : "red" }}>
+                  • At least 1 uppercase letter (A–Z)
+                </p>
+
+                <p style={{ margin: 0, color: /[a-z]/.test(formdata.password) ? "green" : "red" }}>
+                  • At least 1 lowercase letter (a–z)
+                </p>
+
+                <p style={{ margin: 0, color: /\d/.test(formdata.password) ? "green" : "red" }}>
+                  • At least 1 number (0–9)
+                </p>
+
+                <p style={{ margin: 0, color: /[@$!%*?&]/.test(formdata.password) ? "green" : "red" }}>
+                  • At least 1 special character (@, $, !, %, *, ?, &)
+                </p>
+              </div>
+            </div>
 
             <div style={formItem}>
-  <label style={labelStyle}>Create Password</label>
-  <input
-    required
-    type="password"
-    value={formdata.password}
-    onChange={(e) => setformdata({ ...formdata, password: e.target.value })}
-    style={inputStyle}
-  />
-
-  {/* Password Rules */}
-  <div style={{ marginTop: 6, fontSize: 12, color: "#444" }}>
-    <p style={{ margin: 0, color: formdata.password.length >= 8 ? "green" : "red" }}>
-      • Minimum 8 characters
-    </p>
-
-    <p style={{ margin: 0, color: /[A-Z]/.test(formdata.password) ? "green" : "red" }}>
-      • At least 1 uppercase letter (A–Z)
-    </p>
-
-    <p style={{ margin: 0, color: /[a-z]/.test(formdata.password) ? "green" : "red" }}>
-      • At least 1 lowercase letter (a–z)
-    </p>
-
-    <p style={{ margin: 0, color: /\d/.test(formdata.password) ? "green" : "red" }}>
-      • At least 1 number (0–9)
-    </p>
-
-    <p style={{ margin: 0, color: /[@$!%*?&]/.test(formdata.password) ? "green" : "red" }}>
-      • At least 1 special character (@, $, !, %, *, ?, &)
-    </p>
-  </div>
-</div>
-
-
- <div style={formItem}>
                 <label style={labelStyle}>Confirm Password</label>
                 <input
                 required
                 value={formdata.confirmpassword}
                 onChange={(e) => setformdata({ ...formdata, confirmpassword: e.target.value })}
-                type={'password' || 'text'}
+                type='password'
                 style={inputStyle}
                 />
-                </div>
+            </div>
 
           <button type='submit' style={buttonStyle}>Update</button>
           </form>
