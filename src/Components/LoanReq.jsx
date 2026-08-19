@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { getDatabase, ref, query, orderByChild, equalTo, get } from 'firebase/database';
-import { database } from '../DB/Firebase';
+import axios from 'axios';
+import { BASE_URL } from '../config/api';
 import { useLoader } from '../loader/LoaderContext';
 
 const LoanReq = ({ uid }) => {
@@ -11,22 +11,26 @@ const LoanReq = ({ uid }) => {
   
 
   const getApiData = async () => {
-    showLoader()
+    if (!uid) return;
+    showLoader();
     try {
-      const dataRef = ref(database, '/loan/application/');
-      const snapshot = await get(dataRef);
-  
-      if (snapshot.exists()) {
-        const allData = Object.values(snapshot.val() || {});
-        const filteredData = allData.filter(item => item.IntroCode === uid);
-        setData(filteredData);
-      } else {
-        console.log('No data available');
-      }
+      const res = await axios.get(`${BASE_URL}/loan-requests`);
+      const allData = Array.isArray(res.data) ? res.data : (res.data?.data || res.data?.requests || []);
+      
+      // Filter for current agent
+      const filteredData = allData.filter(item => {
+          const intro = String(
+            item.agentCode || item.agent_code || item.IntroCode || item.createdBy || item.introducer || ''
+          ).toLowerCase();
+          return intro === String(uid).toLowerCase();
+      });
+      
+      setData(filteredData);
+      console.log('[LoanReq] Filtered Loan Requests:', filteredData);
     } catch (error) {
-      console.error('Error fetching data:', error);
+      console.error('Error fetching loan requests:', error);
     } finally{
-        hideLoader()
+        hideLoader();
     }
   };
 
@@ -36,8 +40,11 @@ const LoanReq = ({ uid }) => {
 
   useEffect(() => {
     const filteredData = data
-      .filter(item => item.Status === filter)
-      .sort((a, b) => new Date(b.ReceiptDate) - new Date(a.ReceiptDate));
+      .filter(item => {
+          const status = String(item.status || item.Status || 'pending').toLowerCase();
+          return status === String(filter).toLowerCase();
+      })
+      .sort((a, b) => new Date(b.created_at || b.Date || 0) - new Date(a.created_at || a.Date || 0));
     setList(filteredData);
   }, [filter, data]);
 
@@ -51,7 +58,7 @@ const LoanReq = ({ uid }) => {
       >
         <option value="Pending">Pending</option>
         <option value="Approved">Approved</option>
-        <option value="Reject">Rejected</option>
+        <option value="Rejected">Rejected</option>
       </select>
       <TableWithFlatList list={list} />
     </div>
@@ -65,20 +72,40 @@ const TableWithFlatList = ({ list }) => {
         <thead style={{ backgroundColor: '#b4a383', color: 'black' }}>
           <tr>
             <th style={styles.headcell}>Date</th>
-            <th style={styles.headcell}>Application No</th>
+            <th style={styles.headcell}>Request ID</th>
             <th style={styles.headcell}>Member ID</th>
             <th style={styles.headcell}>Name</th>
+            <th style={styles.headcell}>Amount</th>
           </tr>
         </thead>
         <tbody>
-          {list.map((item, index) => (
-            <tr key={index} style={styles.row}>
-              <td style={styles.cell}>{item.Date}</td>
-              <td style={styles.cell}>{item.Code}</td>
-              <td style={styles.cell}>{item.MID}</td>
-              <td style={styles.cell}>{item.MemberName}</td>
+          {list.length === 0 ? (
+            <tr>
+              <td colSpan="5" style={{ textAlign: 'center', padding: '20px', color: '#999' }}>No requests found</td>
             </tr>
-          ))}
+          ) : (
+            list.map((item, index) => {
+              const date = item.created_at || item.createdAt || item.date || item.Date || '—';
+              const reqId = item.request_id || item._id?.$oid || item._id || item.Code || '—';
+              const memberId = item.memberId || item.member_id || item.MID || '—';
+              const name = item.memberName || item.MemberName || '—';
+              const amount = item.requestedAmount || item.loanAmount || 0;
+              
+              return (
+                <tr key={index} style={styles.row}>
+                  <td style={styles.cell}>{date ? new Date(date).toLocaleDateString() : '—'}</td>
+                  <td style={styles.cell}>
+                    <span style={{ fontSize: '12px', background: '#f4f4f4', padding: '2px 6px', borderRadius: '4px' }}>
+                      {reqId.slice(-8).toUpperCase()}
+                    </span>
+                  </td>
+                  <td style={styles.cell}>{memberId}</td>
+                  <td style={styles.cell}>{name}</td>
+                  <td style={styles.cell}>₹{Number(amount).toLocaleString('en-IN')}</td>
+                </tr>
+              );
+            })
+          )}
         </tbody>
       </table>
     </div>
