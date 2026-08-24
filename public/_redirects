@@ -1,0 +1,2 @@
+/api/*  https://api.care2connect.in/:splat  200
+/*      /index.html   200
