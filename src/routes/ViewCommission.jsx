@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { database } from '../DB/Firebase';
@@ -5,6 +6,8 @@ import { ref, onValue, off } from 'firebase/database';
 import { useLoader } from '../loader/LoaderContext';
 
 const ViewCommission = () => {
+  const navigate = useNavigate();
+
   const [UID, setUID] = useState(''); // Simulated UID (replace with real auth logic)
   const [userdata, setuserdata] = useState({});
   const [list, setList] = useState([]);
@@ -146,7 +149,7 @@ const ViewCommission = () => {
               color: '#b4a383',
               marginLeft: '10px'
             }}
-            onClick={() => window.history.back()} // Or use your custom navigate(-1) if using React Router
+            onClick={() => navigate(-1)} // Or use your custom navigate(-1) if using React Router
           ></i>Commissions
         </h2>
       <div style={boxStyle}>

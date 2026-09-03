@@ -1,7 +1,10 @@
+import { useNavigate } from 'react-router-dom';
 import React from 'react'
 import {useLocation} from 'react-router-dom'
 
 const MemberDetails = () => {
+  const navigate = useNavigate();
+
       const location = useLocation();
   const { Data } = location.state;
   // let member = {
@@ -168,7 +171,7 @@ const MemberDetails = () => {
             color: '#b4a383',
             marginLeft: '10px'
           }}
-          onClick={() => window.history.back()} // Or use your custom navigate(-1) if using React Router
+          onClick={() => navigate(-1)} // Or use your custom navigate(-1) if using React Router
         ></i>Member Details
         <span style={statusBadge}>{member.Status}</span>
       </h2>

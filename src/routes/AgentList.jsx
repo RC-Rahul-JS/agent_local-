@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
@@ -20,6 +21,8 @@ const shimmerStyle = {
 };
 
 const AgentList = () => {
+  const navigate = useNavigate();
+
   const [agents, setAgents] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -100,7 +103,7 @@ const AgentList = () => {
             color: '#b4a383',
             marginLeft: '10px',
           }}
-          onClick={() => window.history.back()}
+          onClick={() => navigate(-1)}
         />
         Agent List
       </h2>

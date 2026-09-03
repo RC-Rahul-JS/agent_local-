@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import React,{useState,useEffect} from 'react'
 import { useLoader } from '../loader/LoaderContext';
 import axios from 'axios';
@@ -11,6 +12,8 @@ const header= {
     }
 
 const DrAppoint = () => {
+  const navigate = useNavigate();
+
    const { showLoader, hideLoader } = useLoader();
    const [doctors, setdoctors] = useState([])
    const [av_date, setav_date] = useState([])
@@ -136,7 +139,7 @@ const DrAppoint = () => {
               color: '#b4a383',
               marginLeft: '10px'
             }}
-            onClick={() => window.history.back()} // Or use your custom navigate(-1) if using React Router
+            onClick={() => navigate(-1)} // Or use your custom navigate(-1) if using React Router
           ></i>Book Appointment
           </h2>
          <form onSubmit={create}>

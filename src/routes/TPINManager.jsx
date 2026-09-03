@@ -1,9 +1,12 @@
+import { useNavigate } from 'react-router-dom';
 import React, { useState,useEffect } from 'react';
 import { ref, set,get } from 'firebase/database';
 import { database } from '../DB/Firebase';  
 import { useLoader } from '../loader/LoaderContext';
 
 const TPINManager = () => {
+  const navigate = useNavigate();
+
   const [step, setStep] = useState('verify');
   const [TPIN, setTPIN] = useState('');
   const [currentTPIN, setCurrentTPIN] = useState('');
@@ -209,7 +212,7 @@ const TPINManager = () => {
                     color: '#b4a383',
                     marginLeft: '10px'
                     }}
-                    onClick={() => window.history.back()} // Or use your custom navigate(-1) if using React Router
+                    onClick={() => navigate(-1)} // Or use your custom navigate(-1) if using React Router
                 ></i> TPIN
             </h2>
       <div style={containerStyle}>

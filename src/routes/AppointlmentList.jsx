@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import React, { useState,useEffect } from "react";
 import { useLoader } from '../loader/LoaderContext';
 import axios from 'axios';
@@ -8,6 +9,8 @@ const header= {
       }
     }
 const AppointmentCards = () => {
+  const navigate = useNavigate();
+
 
   const appointments =[
   {
@@ -448,7 +451,7 @@ const getAppointmentStatus = (appointmentDate) => {
               color: '#b4a383',
               marginLeft: '10px'
             }}
-            onClick={() => window.history.back()} // Or use your custom navigate(-1) if using React Router
+            onClick={() => navigate(-1)} // Or use your custom navigate(-1) if using React Router
           ></i>Appointment List
         </h1>
 

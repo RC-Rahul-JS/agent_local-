@@ -1,4 +1,5 @@
-    import React, { useState, useEffect, useRef } from 'react';
+    import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';
     import moment from 'moment';
     import axios from 'axios';
     import { useLocation } from 'react-router-dom';
@@ -10,6 +11,8 @@
     
 
     const FirstMembershipFee = () => {
+  const navigate = useNavigate();
+
         const location = useLocation();
         const { Data } = location.state;
 
@@ -366,7 +369,7 @@ setverifyTPIN(true)
                 color: '#b4a383',
                 marginLeft: '10px'
               }}
-              onClick={() => window.history.back()} // Or use your custom navigate(-1) if using React Router
+              onClick={() => navigate(-1)} // Or use your custom navigate(-1) if using React Router
             ></i>Membership Fee
             </h2>
             <form onSubmit={handleother}>

@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useLoader } from '../loader/LoaderContext';
@@ -5,6 +6,8 @@ import { toast } from 'react-toastify';
 import { BASE_URL } from '../config/api';
 
 const ChangePassword = () => {
+  const navigate = useNavigate();
+
     const { showLoader, hideLoader } = useLoader();
     const initialFormData = {
       old:'',
@@ -103,7 +106,7 @@ const ChangePassword = () => {
       color: '#b4a383',
       marginLeft: '10px'
     }}
-    onClick={() => window.history.back()} 
+    onClick={() => navigate(-1)} 
   ></i>  Change Password
           </h2>
           <form onSubmit={Create}>

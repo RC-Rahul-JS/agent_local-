@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import React, { useState, useEffect } from 'react';
 import moment from 'moment';
 import axios from 'axios';
@@ -6,6 +7,8 @@ import { toast } from 'react-toastify';
 import { BASE_URL } from '../config/api';
 
 const ApplyLoan = () => {
+  const navigate = useNavigate();
+
   const { showLoader, hideLoader } = useLoader();
 
   const initialFormData = {
@@ -428,7 +431,7 @@ const ApplyLoan = () => {
             transform: 'translateY(-50%)', cursor: 'pointer',
             fontSize: '20px', color: '#b4a383', marginLeft: '10px',
           }}
-          onClick={() => window.history.back()}
+          onClick={() => navigate(-1)}
         />
         Loan Application
       </h2>

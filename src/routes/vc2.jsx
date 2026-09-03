@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { database } from '../DB/Firebase';
@@ -5,6 +6,8 @@ import { ref, onValue, off } from 'firebase/database';
 import { useLoader } from '../loader/LoaderContext';
 
 const ViewCommission = () => {
+  const navigate = useNavigate();
+
   const [UID, setUID] = useState('');
   const [userdata, setUserdata] = useState({});
   const [allAgents, setAllAgents] = useState({});
@@ -267,7 +270,7 @@ f2.forEach((account) => {
             color: '#b4a383',
             marginLeft: '10px',
           }}
-          onClick={() => window.history.back()}
+          onClick={() => navigate(-1)}
         ></i>
         Commissions
       </h2>

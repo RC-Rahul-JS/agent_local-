@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import React, { useState, useEffect } from 'react';
 import UploadFile from '../Components/UploadFile';
 import moment from 'moment';
@@ -35,6 +36,8 @@ const toast = {
 };
 
 const MemberApplicationForm = () => {
+  const navigate = useNavigate();
+
   useEffect(() => {
     if (statejosn && statejosn[2]) {
       console.log(statejosn[2].districts);
@@ -537,7 +540,7 @@ const MemberApplicationForm = () => {
             color: '#b4a383',
             marginLeft: '10px',
           }}
-          onClick={() => window.history.back()}
+          onClick={() => navigate(-1)}
         ></i>
         Member Application
       </h2>

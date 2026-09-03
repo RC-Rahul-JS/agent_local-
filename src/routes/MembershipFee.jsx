@@ -1,4 +1,5 @@
-    import React, { useState, useEffect, useRef } from 'react';
+    import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';
     import moment from 'moment';
     import axios from 'axios';
     import { database } from '../DB/Firebase';
@@ -9,6 +10,8 @@
     
 
     const MembershipFee = () => {
+  const navigate = useNavigate();
+
         const initialFormData = {
         date:moment(new Date()).format('yyyy-MM-DD'),
         share:1,
@@ -362,7 +365,7 @@
                 color: '#b4a383',
                 marginLeft: '10px'
               }}
-              onClick={() => window.history.back()} // Or use your custom navigate(-1) if using React Router
+              onClick={() => navigate(-1)} // Or use your custom navigate(-1) if using React Router
             ></i>Membership Fee
             </h2>
             <form onSubmit={handlesubmit}>

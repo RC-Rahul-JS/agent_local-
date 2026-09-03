@@ -36,10 +36,12 @@ function getRandomLightColor() {
 }
 
 const MemberList = () => {
+  const navigate = useNavigate();
+
    const [shimmer, setShimmer] = useState(false);
   const { showLoader, hideLoader } = useLoader();
   const [members, setMembers] = useState([]);
-  const navigate=useNavigate()
+
 
   const fetch_members = async () => {
     try {
@@ -155,7 +157,7 @@ const MemberList = () => {
             color: '#b4a383',
             marginLeft: '10px'
           }}
-          onClick={() => window.history.back()} 
+          onClick={() => navigate(-1)} 
         ></i>
             Member List
       </h2>

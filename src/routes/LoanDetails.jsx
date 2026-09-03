@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import React, { useEffect, useState } from 'react';
 import moment from 'moment';
 import Repayment from '../Components/MRepayment';
@@ -15,6 +16,8 @@ const getRandomLightColor = () => {
 };
 
 const LoanDetails = () => {
+  const navigate = useNavigate();
+
   const [emiData, setEmiData] = useState({});
   const [showpayment, setshowpayment] = useState(false);
   const location = useLocation();
@@ -42,7 +45,7 @@ const LoanDetails = () => {
       color: '#b4a383',
       marginLeft: '10px'
     }}
-    onClick={() => window.history.back()} // Or use your custom navigate(-1) if using React Router
+    onClick={() => navigate(-1)} // Or use your custom navigate(-1) if using React Router
   ></i> Loan Details
       </h2>
         <div style={{ marginBottom: '20px', border: '1px solid #E3E3E3', borderRadius: '15px', padding: '15px' }}>
