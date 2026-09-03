@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import axios from 'axios';
 import Lottie from 'react-lottie';
 import DatePicker from 'react-datepicker';
@@ -38,7 +38,7 @@ const LoanList = () => {
   const [myDate, setMyDate] = useState(new Date());
   const [accounts, setAccounts] = useState([]);
   const [shimmer, setShimmer] = useState(false);
-  const navigate=useNavigate()
+  const navigate = useNavigate();
 
   useEffect(() => {
     const uid = localStorage.getItem('AUID');
@@ -51,13 +51,70 @@ const LoanList = () => {
   const fetchLoans = async (uid) => {
     setShimmer(true);
     try {
-      const res = await axios.get(`https://api.duniyamart.duniyape.in/agent-banking-loan-list/${uid}`);
-      setAccounts(res.data.accounts);
-      console.log(res.data.accounts)
+      const BASE_URL = 'http://192.168.29.39:5001/badri_enterprises/localprime';
+      
+      const [loansRes, membersRes] = await Promise.all([
+        axios.get(`${BASE_URL}/loans`).catch((err) => {
+          console.error('Loans fetch error', err);
+          return { data: [] };
+        }),
+        axios.get(`${BASE_URL}/get-members`).catch((err) => {
+          console.error('Members fetch error', err);
+          return { data: [] };
+        })
+      ]);
+
+      let loansList = Array.isArray(loansRes.data) ? loansRes.data : loansRes.data?.data || Object.values(loansRes.data || {});
+      const membersList = Array.isArray(membersRes.data) ? membersRes.data : membersRes.data?.data || [];
+
+      // 2. Format and map logic
+      const formattedLoans = loansList.map((item, idx) => {
+        const id = item.loan_id || item.loanId || item._id || item.id || `LOAN-${idx}`;
+        const loanNo = item.loanNumber || item.loan_number || item.loanId || item.loan_id || `LN-${idx}`;
+        const rawStatus = String(item.status || item.Status || '').toLowerCase();
+        
+        const agentCode = String(item.agentCode || item.agent_code || item.createdBy || item.introducer || '').trim();
+        
+        // Resolve Member Name
+        const mId = String(item.member_id || item.memberId || '').toLowerCase();
+        const foundMember = membersList.find(
+          (m) => String(m._id || m.id).toLowerCase() === mId || String(m.memberId || m.member_id).toLowerCase() === mId
+        );
+        const name = (item.FirstName || foundMember?.FirstName) 
+          ? `${item.FirstName || foundMember?.FirstName} ${item.LastName || foundMember?.LastName || ''}`.trim()
+          : item.memberName || item.MemberName || 'Unknown Member';
+
+        return {
+          ...item,
+          id,
+          // Variables needed by original UI:
+          member_name: name,
+          account_id: loanNo,
+          roi: item.interestRate || item.roi || item.interest_rate || 0,
+          frequency: item.requestedTenure || item.loanTenure || item.frequency || item.duration || 0,
+          loan_amount: item.loanAmount || item.requestedAmount || item.amount || 0,
+          
+          // Filtering properties
+          status: rawStatus,
+          agentCode: agentCode,
+        };
+      });
+
+      // 3. Filter strictly for Approved/Active AND where AgentCode matches uid (ignoring case)
+      const searchUid = String(uid).trim().toLowerCase();
+      
+      const strictlyApproved = formattedLoans.filter(loan => 
+        ['approved', 'active'].includes(loan.status) &&
+        loan.agentCode.toLowerCase() === searchUid
+      );
+
+      setAccounts(strictlyApproved);
+      
     } catch (err) {
-      console.error(err);
+      console.error('Fetch loans error:', err);
+    } finally {
+      setShimmer(false);
     }
-    setShimmer(false);
   };
 
   const lottieOptions = {
@@ -87,7 +144,7 @@ const LoanList = () => {
             color: '#b4a383',
             marginLeft: '10px'
           }}
-          onClick={() => window.history.back()} // Or use your custom navigate(-1) if using React Router
+          onClick={() => navigate('/')}
         ></i>
             Loan List
      </h2>
@@ -98,15 +155,13 @@ const LoanList = () => {
         style={{ width: '100%', height: 200, objectFit: 'cover' }}
       />
 
-      {/* <div style={{ padding: 20 }}>
-        <DatePicker
-          selected={myDate}
-          onChange={(date) => setMyDate(date)}
-          inline
-        />
-      </div> */}
-
       <div style={{ padding: 20 }}>
+        {accounts.length === 0 && !shimmer ? (
+           <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
+               No Approved Loans found for this Agent on server 192.168.29.39:5001
+           </div>
+        ) : null}
+
         {(shimmer ? [1, 2, 3] : accounts).map((item, idx) => (
           <div key={idx} style={{
             border: '1px solid #E3E3E3',
@@ -143,15 +198,16 @@ const LoanList = () => {
               <button
                 style={{
                   padding: '10px 20px',
-                  backgroundColor: '#1474E1',
+                  backgroundColor: '#10b981',
                   color: 'white',
                   borderRadius: 8,
                   border: 'none',
-                  cursor: 'pointer'
+                  cursor: 'pointer',
+                  fontWeight: 'bold'
                 }}
-                onClick={() => navigate('/loandetails', { state: { Data: item, Mydate: myDate } })}
+                onClick={() => navigate('/payment', { state: { Data: item, Mydate: myDate } })}
               >
-                View Details
+                Payment
               </button>
             </div>
 
