@@ -7,6 +7,7 @@ import MemberApplicationForm from './routes/Addmember'
 import ApplyLoan from './routes/ApplyLoan'
 import LoanList from './routes/LoanList'
 import LoanDetails from './routes/LoanDetails'
+import CustomerPayment from './routes/CustomerPayment'
 import ViewCommission from './routes/ViewCommission'
 import ApplyAgent from './routes/ApplyAgent'
 import ChangePassword from './routes/ChangePassword'
@@ -88,6 +89,14 @@ function App() {
           element={
             <PrivateRoute>
               <LoanDetails />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/payment"
+          element={
+            <PrivateRoute>
+              <CustomerPayment />
             </PrivateRoute>
           }
         />
