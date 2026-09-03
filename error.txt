@@ -1,0 +1,24 @@
+[31m✗[39m Build failed in 278ms
+[31merror during build:
+[31m[vite:esbuild] Transform failed with 1 error:
+C:/Users/pc/Desktop/agent/src/routes/MemberList.jsx:44:8: ERROR: The symbol "navigate" has already been declared[31m
+file: [36mC:/Users/pc/Desktop/agent/src/routes/MemberList.jsx:44:8[31m
+[33m
+[33mThe symbol "navigate" has already been declared[33m
+42 |    const { showLoader, hideLoader } = useLoader();
+43 |    const [members, setMembers] = useState([]);
+44 |    const navigate=useNavigate()
+   |          ^
+45 |  
+46 |    const fetch_members = async () => {
+[31m
+    at failureErrorWithLog (C:\Users\pc\Desktop\agent\node_modules\esbuild\lib\main.js:1467:15)
+    at C:\Users\pc\Desktop\agent\node_modules\esbuild\lib\main.js:736:50
+    at responseCallbacks.<computed> (C:\Users\pc\Desktop\agent\node_modules\esbuild\lib\main.js:603:9)
+    at handleIncomingPacket (C:\Users\pc\Desktop\agent\node_modules\esbuild\lib\main.js:658:12)
+    at Socket.readFromStdout (C:\Users\pc\Desktop\agent\node_modules\esbuild\lib\main.js:581:7)
+    at Socket.emit (node:events:508:28)
+    at addChunk (node:internal/streams/readable:563:12)
+    at readableAddChunkPushByteMode (node:internal/streams/readable:514:3)
+    at Readable.push (node:internal/streams/readable:394:5)
+    at Pipe.onStreamRead (node:internal/stream_base_commons:189:23)[39m
