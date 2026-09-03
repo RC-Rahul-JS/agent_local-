@@ -7,7 +7,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'https://api.care2connect.in',
+        target: 'http://192.168.29.39:5001',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },

@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://api.care2connect.in/:path*"
+      "destination": "http://192.168.29.39:5001/:path*"
     },
     {
       "source": "/(.*)",
