@@ -53,7 +53,7 @@ const LoanList = () => {
     try {
       const BASE_URL = 'http://192.168.29.39:5001/badri_enterprises/localprime';
       
-      const [loansRes, membersRes] = await Promise.all([
+      const [loansRes, membersRes, agentsRes] = await Promise.all([
         axios.get(`${BASE_URL}/loans`).catch((err) => {
           console.error('Loans fetch error', err);
           return { data: [] };
@@ -61,19 +61,31 @@ const LoanList = () => {
         axios.get(`${BASE_URL}/get-members`).catch((err) => {
           console.error('Members fetch error', err);
           return { data: [] };
+        }),
+        axios.get(`${BASE_URL}/agents`).catch((err) => {
+          console.error('Agents fetch error', err);
+          return { data: [] };
         })
       ]);
 
       let loansList = Array.isArray(loansRes.data) ? loansRes.data : loansRes.data?.data || Object.values(loansRes.data || {});
       const membersList = Array.isArray(membersRes.data) ? membersRes.data : membersRes.data?.data || [];
+      const agentsData = Array.isArray(agentsRes.data) ? agentsRes.data : agentsRes.data?.data || [];
+      const agentsList = Array.isArray(agentsData) ? agentsData : agentsData?.agents || [];
+
+      // 3. Filter strictly for Approved/Active/Disbursed AND where AgentCode matches uid (ignoring case)
+      const searchUid = String(uid).trim().toLowerCase();
+      const currentAgent = agentsList.find(ag => String(ag.agentCode || ag.AgentCode || '').trim().toLowerCase() === searchUid);
+      const currentAgentId = currentAgent ? String(currentAgent._id || currentAgent.id).toLowerCase() : null;
 
       // 2. Format and map logic
       const formattedLoans = loansList.map((item, idx) => {
         const id = item.loan_id || item.loanId || item._id || item.id || `LOAN-${idx}`;
         const loanNo = item.loanNumber || item.loan_number || item.loanId || item.loan_id || `LN-${idx}`;
-        const rawStatus = String(item.status || item.Status || '').toLowerCase();
+        const rawStatus = String(item.status || item.loan_status || item.Status || '').toLowerCase();
         
         const agentCode = String(item.agentCode || item.agent_code || item.createdBy || item.introducer || '').trim();
+        const agentId = String(item.agent_id || item.agentId || '').trim().toLowerCase();
         
         // Resolve Member Name
         const mId = String(item.member_id || item.memberId || '').toLowerCase();
@@ -97,16 +109,15 @@ const LoanList = () => {
           // Filtering properties
           status: rawStatus,
           agentCode: agentCode,
+          agentId: agentId,
         };
       });
 
-      // 3. Filter strictly for Approved/Active AND where AgentCode matches uid (ignoring case)
-      const searchUid = String(uid).trim().toLowerCase();
-      
-      const strictlyApproved = formattedLoans.filter(loan => 
-        ['approved', 'active'].includes(loan.status) &&
-        loan.agentCode.toLowerCase() === searchUid
-      );
+      const strictlyApproved = formattedLoans.filter(loan => {
+        const isStatusValid = ['approved', 'active', 'disbursed'].includes(loan.status);
+        const isAgentValid = loan.agentCode.toLowerCase() === searchUid || (currentAgentId && loan.agentId === currentAgentId);
+        return isStatusValid && isAgentValid;
+      });
 
       setAccounts(strictlyApproved);
       
