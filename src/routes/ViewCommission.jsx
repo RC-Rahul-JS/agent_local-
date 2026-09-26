@@ -149,7 +149,7 @@ const ViewCommission = () => {
               color: '#b4a383',
               marginLeft: '10px'
             }}
-            onClick={() => navigate(-1)} // Or use your custom navigate(-1) if using React Router
+            onClick={() => navigate('/')} // Or use your custom navigate(-1) if using React Router
           ></i>Commissions
         </h2>
       <div style={boxStyle}>
