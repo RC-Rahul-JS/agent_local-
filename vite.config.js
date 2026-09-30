@@ -9,6 +9,7 @@ export default defineConfig({
       '/api': {
         target: 'https://api.care2connect.in',
         changeOrigin: true,
+        secure: false,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
     },
