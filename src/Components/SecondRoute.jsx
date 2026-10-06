@@ -28,6 +28,13 @@ const WalletScreen = () => {
   const [userdata, setuserdata] = useState({})
 
   const [showdeposit, setshowdeposit] = useState(false)
+  
+  // API Pagination States
+  const [apiTransactions, setApiTransactions] = useState([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [walletId, setWalletId] = useState(null);
+  
  const [UID, setUID] = useState('')
 useEffect(() => {
  setUID(localStorage.getItem("AUID"))
@@ -114,6 +121,9 @@ useEffect(() => {
             const calculatedAmount = (mappedData.Amount - mappedData.Balance).toFixed(2);
             setamount(calculatedAmount);
             console.log("Mapped Wallet Data:", mappedData);
+            
+            // Set wallet ID for transactions API
+            setWalletId(match._id);
           }
         } else {
           console.warn('No wallet found for agent:', UID);
@@ -125,6 +135,30 @@ useEffect(() => {
 
     fetchWalletDetails();
   }, [UID]);
+  
+  // Fetch paginated transactions from API
+  useEffect(() => {
+    if (!walletId) return;
+
+    const fetchApiTransactions = async () => {
+      try {
+        // showLoader();
+        const res = await axios.get(`${BASE_URL}/wallet/transactions?wallet_id=${walletId}&page=${currentPage}&limit=10`);
+        if (res.data && res.data.success) {
+           setApiTransactions(res.data.data || []);
+           // If backend returns total_pages use it, otherwise use total_count if available
+           const calcPages = res.data.total_pages || Math.ceil((res.data.total_count || 1) / 10) || 1;
+           setTotalPages(calcPages);
+        }
+      } catch (err) {
+        console.error('Error fetching API transactions:', err);
+      } finally {
+        // hideLoader();
+      }
+    };
+
+    fetchApiTransactions();
+  }, [walletId, currentPage]);
   
   useEffect(() => {
     if (!userdata?.LoanCode) return;
@@ -305,6 +339,52 @@ const getData = async()=>{
         <div style={styles.limitText}>Total Limit: ₹{userdata.Amount}</div>
         <button onClick={()=>setopenlink(true)} style={styles.depositBtn}>Bank Deposit</button>
       </div>
+
+      {/* Title for Transactions */}
+      <h3 style={{marginTop: 0, marginBottom: '15px', color: '#514579'}}>Wallet Transactions</h3>
+
+      {/* NEW MONGODB API TRANSACTIONS WITH PAGINATION */}
+      {apiTransactions.map((item, index) => (
+        <div key={`api-${index}`} style={{...styles.transaction, backgroundColor:'#F5F1E7'}}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center" }}>
+                <div style={{display:'grid',placeItems:'center',background:'white',borderRadius:"50%",width:30,height:30,marginRight:10}}>
+                    <span style={{fontSize: 20,fontWeight:"bold",color:item.type==='withdraw'?'red':'green' }}>
+                        {item.type==='withdraw' ? "↑" : "↓"}
+                    </span>
+                </div>
+            <div style={{display:'flex',flexDirection:'column'}}>
+              <span style={{textTransform: 'capitalize', fontWeight: 'bold'}}>{item.type} {item.status ? `( ${item.status} )` : ''}</span>
+              <div style={{ fontSize: 12 }}>{item.created_at ? moment(item.created_at).format("MMM Do YY, h:mm a") : ''}</div>
+            </div>
+            </div>
+          </div>
+          <div style={{ fontWeight: "bold",color:item.type==='withdraw'?'red':'green'}}>
+            {item.type==='withdraw'?'-':'+'}{item.amount ? item.amount : 0}
+          </div>
+        </div>
+      ))}
+
+      {/* Pagination Controls */}
+      {totalPages > 0 && (
+        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding: '10px 0', borderBottom: '1px solid #ccc', marginBottom: '15px'}}>
+          <button 
+            disabled={currentPage === 1}
+            onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+            style={{...styles.depositBtn, marginTop: 0, opacity: currentPage === 1 ? 0.5 : 1}}
+          >
+            Prev
+          </button>
+          <span style={{fontWeight: 'bold'}}>Page {currentPage} of {totalPages}</span>
+          <button 
+            disabled={currentPage === totalPages}
+            onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+            style={{...styles.depositBtn, marginTop: 0, opacity: currentPage === totalPages ? 0.5 : 1}}
+          >
+            Next
+          </button>
+        </div>
+      )}
 
       {Pendingreq.sort((a, b) => moment(b.date).format('YYYYMMDDhhmm') - moment(a.date).format('YYYYMMDDhhmm')).map((item, index) => (
         <div
