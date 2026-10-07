@@ -99,7 +99,7 @@ const AgentHierarchyView = () => {
             color: '#b4a383',
             marginLeft: '10px',
           }}
-          onClick={() => navigate(-1)}
+          onClick={() => navigate('/')}
         />
         Agent List
       </h2>
