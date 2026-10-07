@@ -22,6 +22,7 @@ import AgentHierarchyView from './routes/AgentHierarchyView'
 import AgentList from './routes/AgentList'
 import FirstMembershipFee from './routes/FirstMembershipFee'
 import TPINManager from './routes/TPINManager'
+import CommissionSlabList from './routes/CommissionSlabList'
 
 
 
@@ -217,6 +218,14 @@ function App() {
           element={
             <PrivateRoute>
               <AppointlmentList/>
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/commission-slabs"
+          element={
+            <PrivateRoute>
+              <CommissionSlabList/>
             </PrivateRoute>
           }
         />

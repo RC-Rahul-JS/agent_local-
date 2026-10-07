@@ -11,6 +11,7 @@ const FirstRoute = () => {
     { id: 5, name: 'Apply Agent', icon: 'fa-solid fa-user-secret', action: 'agent' },
     { id: 8, name: 'Agent List', icon: 'fa-solid fa-network-wired', action: 'agentsview' },
     { id: 4, name: 'Commision', icon: 'fa-solid fa-sack-dollar', action: 'commission' },
+    { id: 10, name: 'Comm Slab', icon: 'fa-solid fa-layer-group', action: 'commission-slabs' },
     { id: 6, name: 'Change Pswd', icon: 'fa-solid fa-user-lock', action: 'change' },
     { id: 7, name: 'TPIN', icon: 'fa-solid fa-user-lock', action: 'tpin_manage' },
     // { id: 8, name: 'Dr. Appoint', icon: 'fa-solid fa-user-lock', action: 'dr_appointment' },
