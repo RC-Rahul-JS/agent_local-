@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import Swal from 'sweetalert2';
 
 const FirstRoute = () => {
-  const navigate=useNavigate()
+  const navigate = useNavigate();
   const iconList = [
     { id: 3, name: 'Add Member', icon: 'fa-solid fa-user-plus', action: 'addmember' },
     { id: 9, name: 'Member List', icon: 'fa-solid fa-handshake', action: 'memberlist' },
@@ -14,9 +15,22 @@ const FirstRoute = () => {
     { id: 10, name: 'Comm Slab', icon: 'fa-solid fa-layer-group', action: 'commission-slabs' },
     { id: 6, name: 'Change Pswd', icon: 'fa-solid fa-user-lock', action: 'change' },
     { id: 7, name: 'TPIN', icon: 'fa-solid fa-user-lock', action: 'tpin_manage' },
-    // { id: 8, name: 'Dr. Appoint', icon: 'fa-solid fa-user-lock', action: 'dr_appointment' },
-    // { id: 9, name: 'Appoint List', icon: 'fa-solid fa-user-lock', action: 'appointment_list' },
+    { id: 11, name: 'Dr. Appoint', icon: 'fa-solid fa-user-doctor', action: 'dr_appointment' },
+    { id: 12, name: 'Appoint List', icon: 'fa-solid fa-clipboard-list', action: 'appointment_list' },
   ];
+
+  const handleIconClick = (item) => {
+    if (item.action) {
+      navigate('/' + item.action.replace(/^\//, ''));
+    } else {
+      Swal.fire({
+        icon: 'info',
+        title: 'Coming Soon',
+        text: 'Doctor appointment feature will be available soon.',
+        confirmButtonColor: '#385FBF',
+      });
+    }
+  };
 
   const [searchText, setSearchText] = useState("");
   const [info, setInfo] = useState({});
@@ -37,7 +51,7 @@ const FirstRoute = () => {
   {iconList.map((item) => (
     <button
       key={item.id}
-      onClick={() => navigate(item.action)}
+      onClick={() => handleIconClick(item)}
       style={{ 
         display: 'flex', 
         flexDirection: 'column', 

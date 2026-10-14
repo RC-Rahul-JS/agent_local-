@@ -6,28 +6,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Vite + React</title>
   <script src="https://kit.fontawesome.com/f34c5a1c20.js" crossorigin="anonymous"></script>
-
-    <script type="module" crossorigin src="/assets/index-DXhdjhmv.js"></script>
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+    <script type="module" crossorigin src="/assets/index-BJTGdUik.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/index-Dp9TSSyc.css">
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"></div>
 
-
-    <script>
-    // Disable back button
-    function disableBackButton() {
-      // Push a dummy state
-      window.history.pushState(null, "", window.location.href);
-
-      window.onpopstate = function () {
-        // whenever back button pressed, push state again
-        window.history.pushState(null, "", window.location.href);
-      };
-    }
-
-    window.onload = disableBackButton;
-  </script>
 
   </body>
 </html>
