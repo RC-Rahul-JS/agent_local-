@@ -3,8 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import moment from 'moment';
 import Swal from 'sweetalert2';
+import { DOMAIN, API_BASE_URL } from '../config/api';
 
-const BASE_URL = 'http://192.168.29.39:5001';
+const BASE_URL = DOMAIN || API_BASE_URL;
 
 const AppointlmentList = () => {
   const navigate = useNavigate();
@@ -30,11 +31,19 @@ const AppointlmentList = () => {
   // Modal State for Details
   const [selectedAppointment, setSelectedAppointment] = useState(null);
 
-  // Fetch doctors list for doctor name lookup
+  // Fetch doctors list for doctor name lookup (cached in sessionStorage to avoid 1MB re-downloads)
   const fetchDoctors = async () => {
     try {
+      const cached = sessionStorage.getItem('c2c_cached_doctors');
+      if (cached) {
+        try {
+          const map = JSON.parse(cached);
+          if (Object.keys(map).length > 0) setDoctorsMap(map);
+        } catch (_) {}
+      }
+
       const res = await axios.get(`${BASE_URL}/c2c_app/doctors`, {
-        timeout: 10000,
+        timeout: 45000,
         headers: { 'ngrok-skip-browser-warning': 'true' }
       });
       if (res.data && Array.isArray(res.data.data)) {
@@ -45,6 +54,9 @@ const AppointlmentList = () => {
           if (doc.doctorId) map[doc.doctorId] = doc;
         });
         setDoctorsMap(map);
+        try {
+          sessionStorage.setItem('c2c_cached_doctors', JSON.stringify(map));
+        } catch (_) {}
       }
     } catch (err) {
       console.warn('Could not fetch doctors list for mapping:', err.message);
@@ -68,7 +80,7 @@ const AppointlmentList = () => {
       const targetAgent = agentId || 'AG001';
       const res = await axios.get(`${BASE_URL}/c2c_app/appointments/agent/${targetAgent}`, {
         params,
-        timeout: 15000,
+        timeout: 45000,
         headers: { 'ngrok-skip-browser-warning': 'true' }
       });
 

@@ -4,13 +4,14 @@ import Swal from 'sweetalert2';
 import axios from 'axios';
 import moment from 'moment';
 import { useLoader } from '../loader/LoaderContext';
+import { DOMAIN, API_BASE_URL, BASE_URL } from '../config/api';
 
 /**
  * =========================================================================
- * ⚙️ API CONFIGURATION & DUAL-SERVER FALLBACK
+ * ⚙️ API CONFIGURATION (CENTRALIZED FROM api.js)
  * =========================================================================
  */
-const PRIMARY_BASE_URL = 'http://192.168.29.39:5001';
+const PRIMARY_BASE_URL = DOMAIN || API_BASE_URL;
 const RAZORPAY_KEY = 'rzp_test_TlMQdAmmaO6PuE';
 
 // Dynamic API caller that interfaces with primary server without triggering cross-origin fallback errors
@@ -21,7 +22,7 @@ const apiRequest = async (endpoint, method = 'get', payload = null) => {
     url: `${PRIMARY_BASE_URL}${cleanEndpoint}`,
     method,
     data: payload,
-    timeout: 15000,
+    timeout: 45000,
     headers: { 'ngrok-skip-browser-warning': 'true' },
   });
   return res.data;
@@ -42,34 +43,6 @@ const loadRazorpayScript = () => {
     document.body.appendChild(script);
   });
 };
-
-// Initial Sample Doctors for Instant Preview / Testing matching backend API structure
-const SAMPLE_DOCTORS = [
-  {
-    mongoid: '6ac7539516265f54a34ae8c9',
-    secondaryId: 'URO545',
-    doctor_name: 'Demo Doctor',
-    specialization: 'ortho',
-    appointmentfee: '550',
-    appointmentdatelimit: '',
-  },
-  {
-    mongoid: '6ac7541b16265f54a34ae8d2',
-    secondaryId: '123',
-    doctor_name: 'Dr. Suresh',
-    specialization: 'Surgeon',
-    appointmentfee: '1',
-    appointmentdatelimit: '',
-  },
-  {
-    mongoid: '6ac8ac12fa7d05bb363aaaf9',
-    secondaryId: '4',
-    doctor_name: 'rahul demo',
-    specialization: 'ehb',
-    appointmentfee: '330',
-    appointmentdatelimit: '3',
-  },
-];
 
 const DrAppoint = () => {
   const navigate = useNavigate();
@@ -120,9 +93,59 @@ const DrAppoint = () => {
   const [isFetchingPin, setIsFetchingPin] = useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
 
-  // Preload Razorpay SDK on component mount
+  // Agent Wallet Balance state
+  const [walletBalance, setWalletBalance] = useState(null);
+  const [walletNumber, setWalletNumber] = useState('');
+  const [walletLoading, setWalletLoading] = useState(false);
+  const [agentMongoId, setAgentMongoId] = useState('');
+  const [walletDbId, setWalletDbId] = useState('');
+
+  // Helper to extract clean numeric fee from selected doctor
+  const getNumericFee = () => {
+    if (!selectedDoctor) return 0;
+    const feeRaw = selectedDoctor.appointmentfee || selectedDoctor.fee || 0;
+    const cleaned = String(feeRaw).replace(/[^0-9.]/g, '');
+    return parseFloat(cleaned) || 0;
+  };
+
+  // Fetch Agent Wallet Balance
+  const fetchAgentWallet = async () => {
+    const rawAgentId = localStorage.getItem('AUID') || 'AG001';
+    setWalletLoading(true);
+
+    try {
+      const listRes = await axios.get(`${BASE_URL}/wallet/list`, {
+        timeout: 30000,
+        headers: { 'ngrok-skip-browser-warning': 'true' },
+      });
+
+      const wallets = listRes.data?.data || [];
+      const match = wallets.find(
+        (w) =>
+          (w.agentCode || '').toLowerCase() === rawAgentId.toLowerCase() ||
+          (w.agent_id || '').toLowerCase() === rawAgentId.toLowerCase()
+      );
+
+      if (match) {
+        const bal = match.availableCredit !== undefined ? Number(match.availableCredit) : 0;
+        setWalletBalance(bal);
+        setWalletNumber(match.walletNumber || '');
+        if (match.agent_id) setAgentMongoId(match.agent_id);
+        if (match._id) setWalletDbId(match._id);
+      } else {
+        setWalletBalance(0);
+      }
+    } catch (err) {
+      console.warn('Error fetching agent wallet:', err.message);
+    } finally {
+      setWalletLoading(false);
+    }
+  };
+
+  // Preload Razorpay SDK and fetch agent wallet balance on component mount
   useEffect(() => {
     loadRazorpayScript();
+    fetchAgentWallet();
   }, []);
 
   // Auto-calculate Age on DOB change
@@ -141,7 +164,7 @@ const DrAppoint = () => {
     }
   };
 
-  // Auto-fetch City and State from India Post API when 6-digit pincode is typed
+  // Auto-fetch City and State: check primary API first, then postal directory
   const handlePatientPinCodeChange = async (e) => {
     const val = e.target.value.replace(/\D/g, '').slice(0, 6);
     setFormData((prev) => ({ ...prev, pincode: val }));
@@ -149,15 +172,42 @@ const DrAppoint = () => {
     if (val.length === 6) {
       setIsFetchingPin(true);
       try {
+        // 1. Primary backend API
+        try {
+          const apiRes = await apiRequest(`/c2c_app/doctors/by-pincode?pincode=${val}`);
+          if (apiRes && (apiRes.city || apiRes.district || apiRes.state)) {
+            setFormData((prev) => ({
+              ...prev,
+              city: apiRes.city || apiRes.district || '',
+              state: apiRes.state || '',
+            }));
+            setIsFetchingPin(false);
+            return;
+          }
+        } catch (_) { }
+
+        // 2. Postal directory API
         const res = await fetch(`https://api.postalpincode.in/pincode/${val}`);
         const data = await res.json();
-        if (data && data[0] && data[0].Status === 'Success') {
+        if (data && data[0] && data[0].Status === 'Success' && Array.isArray(data[0].PostOffice) && data[0].PostOffice.length > 0) {
           const postOffice = data[0].PostOffice[0];
           setFormData((prev) => ({
             ...prev,
-            city: postOffice.District || postOffice.Block || '',
+            city: postOffice.District || postOffice.Block || postOffice.Name || '',
             state: postOffice.State || '',
           }));
+        } else {
+          setFormData((prev) => ({
+            ...prev,
+            city: '',
+            state: '',
+          }));
+          Swal.fire({
+            icon: 'info',
+            title: 'No Postal Record Found',
+            text: `Pincode ${val} ka record nahi mila. Kripya City aur State enter karein.`,
+            confirmButtonColor: '#385FBF',
+          });
         }
       } catch (err) {
         console.warn('Error fetching patient pincode details:', err);
@@ -190,8 +240,8 @@ const DrAppoint = () => {
     try {
       let found = null;
 
-      // 1. Direct call to http://192.168.29.39:5001 for doctor ID search
-      const doctorIdApiUrl = `http://192.168.29.39:5001/c2c_app/doctors/by-secondary-id?secondaryId=${encodeURIComponent(cleanId)}`;
+      // 1. Direct call to PRIMARY_BASE_URL for doctor ID search
+      const doctorIdApiUrl = `${PRIMARY_BASE_URL}/c2c_app/doctors/by-secondary-id?secondaryId=${encodeURIComponent(cleanId)}`;
       console.log('Searching Doctor by ID from:', doctorIdApiUrl);
 
       try {
@@ -206,17 +256,7 @@ const DrAppoint = () => {
           found = res.data.data;
         }
       } catch (apiErr) {
-        console.warn('Direct doctor ID search from http://192.168.29.39:5001 error:', apiErr.message);
-      }
-
-      // 2. Fallback search in sample list if offline or server unreachable
-      if (!found) {
-        found = SAMPLE_DOCTORS.find(
-          (doc) =>
-            (doc.secondaryId && doc.secondaryId.toLowerCase() === cleanId.toLowerCase()) ||
-            (doc.id && doc.id.toLowerCase() === cleanId.toLowerCase()) ||
-            (doc.mongoid && doc.mongoid.toLowerCase() === cleanId.toLowerCase())
-        );
+        console.warn(`Direct doctor ID search from ${PRIMARY_BASE_URL} error:`, apiErr.message);
       }
 
       if (found) {
@@ -301,34 +341,23 @@ const DrAppoint = () => {
           });
         }
       } else {
-        // Fallback for demo or network issue
-        if (cleanPincode === '480882' || cleanPincode === '480661') {
-          setPincodeDoctors(SAMPLE_DOCTORS);
-          setDetectedBlock('District Center, Madhya Pradesh (Pincode: ' + cleanPincode + ')');
-        } else {
-          setPincodeDoctors([]);
-          Swal.fire({
-            icon: 'warning',
-            title: 'Not Found',
-            text: res?.message || `No doctors found for pincode ${cleanPincode}.`,
-            confirmButtonColor: '#385FBF',
-          });
-        }
-      }
-    } catch (err) {
-      console.error('Pincode fetch error:', err);
-      // Fallback sample data if server error happens
-      if (cleanPincode === '480882' || cleanPincode === '480661') {
-        setPincodeDoctors(SAMPLE_DOCTORS);
-        setDetectedBlock('District Center, Madhya Pradesh (Pincode: ' + cleanPincode + ')');
-      } else {
+        setPincodeDoctors([]);
         Swal.fire({
-          icon: 'error',
-          title: 'Connection Issue',
-          text: `Unable to fetch doctors for pincode ${cleanPincode}. Please verify connection.`,
+          icon: 'warning',
+          title: 'Not Found',
+          text: res?.message || `No doctors found for pincode ${cleanPincode}.`,
           confirmButtonColor: '#385FBF',
         });
       }
+    } catch (err) {
+      console.error('Pincode fetch error:', err);
+      setPincodeDoctors([]);
+      Swal.fire({
+        icon: 'error',
+        title: 'Connection Issue',
+        text: `Unable to fetch doctors for pincode ${cleanPincode}. Please verify connection.`,
+        confirmButtonColor: '#385FBF',
+      });
     } finally {
       hideLoader();
     }
@@ -368,14 +397,6 @@ const DrAppoint = () => {
     // Limit dates to appointmentdatelimit if specified
     if (dates && dates.length > 0 && maxDays > 0) {
       dates = dates.slice(0, maxDays);
-    }
-
-    // Fallback: If API returns empty, provide upcoming maxDays days
-    if (!dates || dates.length === 0) {
-      dates = [];
-      for (let i = 0; i < maxDays; i++) {
-        dates.push(moment().add(i, 'days').format('YYYY-MM-DD'));
-      }
     }
 
     setAvailableDates(dates);
@@ -429,19 +450,7 @@ const DrAppoint = () => {
       console.warn('Doctor slots API info:', err.message);
     }
 
-    // Fallback: If no slots from API, use default consulting hours
-    if (finalSlots.length === 0) {
-      finalSlots = [
-        '10:00 AM - 11:00 AM',
-        '11:00 AM - 12:00 PM',
-        '12:00 PM - 01:00 PM',
-        '02:00 PM - 03:00 PM',
-        '03:30 PM - 04:30 PM',
-        '05:00 PM - 06:00 PM',
-      ];
-    }
-
-    // Normalize slots format
+    // Normalize slots format strictly from API
     const formatted = finalSlots
       .map((s) => {
         if (typeof s === 'string') return { id: s, title: s, enabled: true };
@@ -549,15 +558,127 @@ const DrAppoint = () => {
     setShowReviewModal(true);
   };
 
-  // STEP 2: RAZORPAY PAYMENT & APPOINTMENT CONFIRMATION (EXECUTED AFTER REVIEW CONFIRMATION)
+  // Finalize booking success, store booked details for receipt and display modal
+  const finalizeBookingSuccess = async ({
+    appointmentNumber,
+    appointmentIndex,
+    paymentId = 'WALLET_' + Date.now(),
+  }) => {
+    hideLoader();
+
+    // Save full appointment details so receipt stays on this page (no redirect away)
+    setBookedAppointment({
+      appointmentNumber,
+      appointmentIndex: appointmentIndex !== null ? appointmentIndex : null,
+      doctorName: selectedDoctor.name,
+      specialization: selectedDoctor.specialization || selectedDoctor.specialty,
+      doctorFee: selectedDoctor.fee,
+      hospital: selectedDoctor.hospital || detectedBlock || 'Care Clinic',
+      date: selectedDate,
+      timeSlot: selectedSlot,
+      patientName: formData.patientName,
+      fatherName: formData.fatherName,
+      age: formData.age,
+      gender: formData.gender,
+      mobileNumber: formData.mobileNumber,
+      city: formData.city,
+      state: formData.state,
+      pincode: formData.pincode,
+      address: formData.address,
+      symptoms: formData.symptoms,
+      paymentId: paymentId || 'WALLET_CONFIRMED',
+      bookingTime: moment().format('DD MMM YYYY, hh:mm A'),
+    });
+
+    // Show Success Receipt Modal with Backend Appointment Number / Index
+    await Swal.fire({
+      icon: 'success',
+      title: 'Appointment Booked Successfully!',
+      html: `
+        <div style="background: #eff6ff; border: 1.5px dashed #3b82f6; border-radius: 10px; padding: 14px; margin-bottom: 16px; text-align: center;">
+          <span style="font-size: 11px; color: #1e40af; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px;">Appointment Number</span>
+          <h2 style="margin: 4px 0 0; color: #1d4ed8; font-size: 24px; font-weight: 800;">${appointmentNumber}</h2>
+          ${appointmentIndex !== null && String(appointmentIndex) !== String(appointmentNumber)
+          ? `<div style="margin-top: 6px;"><span style="background: #dbeafe; color: #1e40af; padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 700;">Appointment Index (Token): #${appointmentIndex}</span></div>`
+          : ''
+        }
+        </div>
+        <div style="text-align: left; font-size: 14px; background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0;">
+          <p style="margin: 4px 0;"><strong>Doctor:</strong> ${selectedDoctor.name}</p>
+          <p style="margin: 4px 0;"><strong>Date:</strong> ${moment(selectedDate).format('Do MMMM YYYY')}</p>
+          <p style="margin: 4px 0;"><strong>Time Slot:</strong> ${selectedSlot}</p>
+          <p style="margin: 4px 0;"><strong>Payment / Ref ID:</strong> ${paymentId}</p>
+          <hr style="margin: 8px 0; border: none; border-top: 1px dashed #cbd5e1;" />
+          <p style="margin: 4px 0;"><strong>Patient:</strong> ${formData.patientName} (${formData.age} Yrs)</p>
+          <p style="margin: 4px 0;"><strong>Mobile:</strong> +91 ${formData.mobileNumber}</p>
+          <p style="margin: 4px 0;"><strong>Address:</strong> ${formData.address}, ${formData.city} (${formData.pincode})</p>
+        </div>
+      `,
+      confirmButtonColor: '#385FBF',
+      confirmButtonText: 'View Receipt',
+    });
+
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    fetchAgentWallet(); // Refresh wallet balance in background after successful booking
+  };
+
+  // STEP 2: AGENT CREATE ORDER & APPOINTMENT CONFIRMATION (EXECUTED AFTER REVIEW CONFIRMATION)
   const executeBookingAndPayment = async () => {
+    // 1. Strict validation: Wallet balance check
+    const numericFee = getNumericFee();
+    if (walletBalance !== null && walletBalance < numericFee) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Insufficient Wallet Balance',
+        html: `
+          <div style="font-size: 14px; text-align: left; padding: 12px; background: #fef2f2; border: 1.5px solid #fca5a5; border-radius: 8px;">
+            <p style="margin: 0 0 6px 0; color: #991b1b; font-weight: 700;">Aapke wallet me paryapt balance nahi hai!</p>
+            <p style="margin: 4px 0; color: #374151;">Available Balance: <strong style="color: #dc2626;">₹${Number(walletBalance || 0).toFixed(2)}</strong></p>
+            <p style="margin: 4px 0; color: #374151;">Required Fee: <strong style="color: #1e3a8a;">₹${numericFee.toFixed(2)}</strong></p>
+            <p style="margin: 4px 0; color: #374151;">Shortage: <strong style="color: #dc2626;">₹${(numericFee - Number(walletBalance || 0)).toFixed(2)}</strong></p>
+          </div>
+          <p style="margin-top: 12px; font-size: 13px; color: #64748b;">Kripya wallet recharge karne ke baad appointment book karein.</p>
+        `,
+        confirmButtonColor: '#385FBF',
+        confirmButtonText: 'Theek hai',
+      });
+      return;
+    }
+
     setShowReviewModal(false);
 
-    const currentAgentId = localStorage.getItem('AUID') || 'H0001';
+    const rawAgentId = localStorage.getItem('AUID') || 'AG001';
+    showLoader();
+
+    // Resolve Mongo ObjectId for backend agent wallet lookup
+    let targetAgentId = agentMongoId;
+    let targetWalletId = walletDbId;
+    if (!targetAgentId || !/^[a-f\d]{24}$/i.test(targetAgentId)) {
+      try {
+        const listRes = await axios.get(`${BASE_URL}/wallet/list`, {
+          timeout: 20000,
+          headers: { 'ngrok-skip-browser-warning': 'true' },
+        });
+        const wallets = listRes.data?.data || [];
+        const match = wallets.find(
+          (w) =>
+            (w.agentCode || '').toLowerCase() === rawAgentId.toLowerCase() ||
+            (w.agent_id || '').toLowerCase() === rawAgentId.toLowerCase()
+        );
+        if (match) {
+          if (match.agent_id) targetAgentId = match.agent_id;
+          if (match._id) targetWalletId = match._id;
+        }
+      } catch (_) { }
+    }
+
     const docId = selectedDoctor.mongoid || selectedDoctor.id;
     const appointmentPayload = {
-      agent_id: currentAgentId,
-      agentId: currentAgentId,
+      agent_id: targetAgentId || rawAgentId,
+      agent_code: rawAgentId,
+      agentCode: rawAgentId,
+      agentId: rawAgentId,
+      wallet_id: targetWalletId || targetAgentId || rawAgentId,
       mobile: formData.mobileNumber.trim(),
       patient_phone: formData.mobileNumber.trim(),
       doctor_id: docId,
@@ -583,13 +704,93 @@ const DrAppoint = () => {
       sex: formData.gender,
       gender: formData.gender,
       vaccine: true,
+      amount: selectedDoctor.appointmentfee || selectedDoctor.fee || 250,
+      fee: selectedDoctor.appointmentfee || selectedDoctor.fee || 250,
     };
 
-    console.log('Initiating appointment payment order:', appointmentPayload);
-    showLoader();
+    console.log('Initiating agent appointment order (/agent-create-order):', appointmentPayload);
 
     try {
-      // Step 1: Guarantee Razorpay SDK is loaded
+      // Step 1: Call Backend Agent Create Order API (/c2c_app/agent-create-order)
+      let orderRes = null;
+      try {
+        orderRes = await apiRequest('/c2c_app/agent-create-order', 'post', appointmentPayload);
+      } catch (callErr) {
+        // If backend returned a JSON error response (e.g. 404/400 with "Wallet not found", etc.)
+        if (callErr.response?.data && (callErr.response.data.error || callErr.response.data.message)) {
+          hideLoader();
+          Swal.fire({
+            icon: 'error',
+            title: 'Booking Failed',
+            text: callErr.response.data.error || callErr.response.data.message,
+            confirmButtonColor: '#385FBF',
+          });
+          return;
+        }
+
+        // Only retry /agent-create-order if route not found (HTML response)
+        if (callErr.response?.status === 404 && typeof callErr.response?.data === 'string') {
+          orderRes = await apiRequest('/agent-create-order', 'post', appointmentPayload);
+        } else {
+          throw callErr;
+        }
+      }
+
+      console.log('agent-create-order response from backend:', orderRes);
+
+      // Check if backend returned an error in JSON body
+      if (orderRes && (orderRes.success === false || orderRes.status === 'failed')) {
+        hideLoader();
+        Swal.fire({
+          icon: 'error',
+          title: 'Booking Failed',
+          text: orderRes.error || orderRes.message || 'Unable to book appointment.',
+          confirmButtonColor: '#385FBF',
+        });
+        return;
+      }
+
+      const orderData = orderRes?.data || orderRes || {};
+      const orderId = orderData.id || orderData.order_id || orderRes?.id || orderRes?.order_id;
+
+      // Extract appointment details if available
+      const appointmentIndex =
+        orderData.appointment_index !== undefined && orderData.appointment_index !== null
+          ? orderData.appointment_index
+          : orderData.appoint_index !== undefined && orderData.appoint_index !== null
+            ? orderData.appoint_index
+            : orderData.index_number !== undefined && orderData.index_number !== null
+              ? orderData.index_number
+              : null;
+
+      const backendAppointNo =
+        orderData.appoint_number ||
+        orderData.appointment_number ||
+        orderData.appointment_no ||
+        orderData.appointment_id ||
+        orderData.booking_id;
+
+      const appointmentNumber =
+        backendAppointNo ||
+        (appointmentIndex !== null ? `No. ${appointmentIndex}` : `APPT-${Date.now().toString().slice(-6)}`);
+
+      // If order creates appointment directly (e.g. from Agent Wallet) OR has no Razorpay orderId
+      const isRazorpayOrder = typeof orderId === 'string' && orderId.startsWith('order_');
+
+      if (!isRazorpayOrder) {
+        // Direct booking completed via agent wallet - no verify API, no Razorpay popup needed
+        await finalizeBookingSuccess({
+          appointmentNumber,
+          appointmentIndex,
+          paymentId: orderData.payment_id || orderData.pay_id || 'WALLET_' + Date.now(),
+        });
+        return;
+      }
+
+      // If backend returned a Razorpay orderId, open Razorpay checkout
+      let amountInPaise = orderData.amount || (selectedDoctor.appointmentfee || 250) * 100;
+      let currency = orderData.currency || 'INR';
+
       const isLoaded = await loadRazorpayScript();
       if (!isLoaded || typeof window.Razorpay === 'undefined') {
         hideLoader();
@@ -602,43 +803,15 @@ const DrAppoint = () => {
         return;
       }
 
-      // Step 2: Create Razorpay Order via Backend
-      let orderId = null;
-      let amountInPaise = (selectedDoctor.appointmentfee || 250) * 100;
-      let currency = 'INR';
-
-      try {
-        const orderRes = await apiRequest('/c2c_app/web-create-order', 'post', appointmentPayload);
-        console.log('web-create-order response from backend:', orderRes);
-        if (orderRes) {
-          const orderData = orderRes.data || orderRes;
-          orderId = orderData.id || orderData.order_id || orderRes.id || orderRes.order_id;
-          if (orderData.amount) amountInPaise = orderData.amount;
-          if (orderData.currency) currency = orderData.currency;
-        }
-        console.log('Extracted Razorpay Order ID for checkout:', orderId);
-      } catch (orderErr) {
-        console.error('Backend web-create-order error:', orderErr.message);
-        hideLoader();
-        Swal.fire({
-          icon: 'error',
-          title: 'Order Creation Failed',
-          text: 'Backend order create nahi kar paya: ' + (orderErr.response?.data?.error || orderErr.message),
-          confirmButtonColor: '#385FBF',
-        });
-        return;
-      }
-
       hideLoader();
 
-      // Step 3: Open Razorpay Checkout Modal (ALWAYS TRIGGER RAZORPAY - NEVER SKIP)
       const options = {
         key: RAZORPAY_KEY,
         amount: amountInPaise.toString(),
         currency: currency,
         name: 'Care2Connect',
         description: `Doctor Appointment with ${selectedDoctor.name}`,
-        ...(orderId ? { order_id: orderId } : {}),
+        order_id: orderId,
         prefill: {
           name: formData.patientName,
           contact: formData.mobileNumber,
@@ -649,144 +822,12 @@ const DrAppoint = () => {
         },
         handler: async (response) => {
           showLoader();
-
-          try {
-            const currentAgentId = localStorage.getItem('AUID') || 'H0001';
-            // Strictly call Backend Verification API (/c2c_app/verify)
-            const verifyRes = await apiRequest('/c2c_app/verify', 'post', {
-              razorpay_order_id: response.razorpay_order_id || orderId || '',
-              razorpay_payment_id: response.razorpay_payment_id,
-              razorpay_signature: response.razorpay_signature || '',
-              amount: amountInPaise / 100,
-              agent_id: currentAgentId,
-              agentId: currentAgentId,
-              doctor_phone_id: selectedDoctor.mongoid || selectedDoctor.id,
-              date_of_appointment: selectedDate,
-              time_slot: selectedSlot,
-              patient_name: formData.patientName.trim(),
-              guardian_name: formData.fatherName.trim(),
-              phone: formData.mobileNumber.trim(),
-              city: formData.city || 'District Center',
-              address: formData.address.trim(),
-              age: formData.age || '25',
-              gender: formData.gender,
-            });
-
-            console.log('Backend Payment Verification Response:', verifyRes);
-
-            // STRICT CHECK: Backend status 'success' hona zaroori hai
-            const isVerified =
-              verifyRes &&
-              (verifyRes.status === 'success' || verifyRes.success === true || verifyRes.status === 200);
-
-            if (!isVerified) {
-              hideLoader();
-              Swal.fire({
-                icon: 'error',
-                title: 'Verification Failed',
-                text:
-                  verifyRes?.message ||
-                  verifyRes?.error ||
-                  'Backend verification failed. Payment not confirmed on server.',
-                confirmButtonColor: '#385FBF',
-              });
-              return;
-            }
-
-            // Appointment Number & appointment_index strictly backend response se lena
-            const vData = verifyRes.data || verifyRes;
-
-            const appointmentIndex =
-              vData.appointment_index !== undefined && vData.appointment_index !== null
-                ? vData.appointment_index
-                : vData.appoint_index !== undefined && vData.appoint_index !== null
-                ? vData.appoint_index
-                : vData.index_number !== undefined && vData.index_number !== null
-                ? vData.index_number
-                : null;
-
-            const backendAppointNo =
-              vData.appoint_number ||
-              vData.appointment_number ||
-              vData.appointment_no ||
-              vData.appointment_id ||
-              vData.booking_id;
-
-            // Agar appoint_number hai to wahi use hoga, warna appointment_index ko hi appointment number banayenge:
-            const appointmentNumber =
-              backendAppointNo ||
-              (appointmentIndex !== null ? `No. ${appointmentIndex}` : `APPT-${Date.now().toString().slice(-6)}`);
-
-            hideLoader();
-
-            // Save full appointment details so receipt stays on this page (no redirect away)
-            setBookedAppointment({
-              appointmentNumber,
-              appointmentIndex: appointmentIndex !== null ? appointmentIndex : null,
-              doctorName: selectedDoctor.name,
-              specialization: selectedDoctor.specialization || selectedDoctor.specialty,
-              doctorFee: selectedDoctor.fee,
-              hospital: selectedDoctor.hospital || detectedBlock || 'Care Clinic',
-              date: selectedDate,
-              timeSlot: selectedSlot,
-              patientName: formData.patientName,
-              fatherName: formData.fatherName,
-              age: formData.age,
-              gender: formData.gender,
-              mobileNumber: formData.mobileNumber,
-              city: formData.city,
-              state: formData.state,
-              pincode: formData.pincode,
-              address: formData.address,
-              symptoms: formData.symptoms,
-              paymentId: response.razorpay_payment_id || 'PAY_' + Date.now(),
-              bookingTime: moment().format('DD MMM YYYY, hh:mm A'),
-            });
-
-            // Show Success Receipt Modal with Backend Appointment Number / Index
-            await Swal.fire({
-              icon: 'success',
-              title: 'Appointment Booked Successfully!',
-              html: `
-                <div style="background: #eff6ff; border: 1.5px dashed #3b82f6; border-radius: 10px; padding: 14px; margin-bottom: 16px; text-align: center;">
-                  <span style="font-size: 11px; color: #1e40af; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px;">Appointment Number</span>
-                  <h2 style="margin: 4px 0 0; color: #1d4ed8; font-size: 24px; font-weight: 800;">${appointmentNumber}</h2>
-                  ${
-                    appointmentIndex !== null && String(appointmentIndex) !== String(appointmentNumber)
-                      ? `<div style="margin-top: 6px;"><span style="background: #dbeafe; color: #1e40af; padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 700;">Appointment Index (Token): #${appointmentIndex}</span></div>`
-                      : ''
-                  }
-                </div>
-                <div style="text-align: left; font-size: 14px; background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0;">
-                  <p style="margin: 4px 0;"><strong>Doctor:</strong> ${selectedDoctor.name}</p>
-                  <p style="margin: 4px 0;"><strong>Date:</strong> ${moment(selectedDate).format('Do MMMM YYYY')}</p>
-                  <p style="margin: 4px 0;"><strong>Time Slot:</strong> ${selectedSlot}</p>
-                  <p style="margin: 4px 0;"><strong>Payment ID:</strong> ${response.razorpay_payment_id || 'Success'}</p>
-                  <hr style="margin: 8px 0; border: none; border-top: 1px dashed #cbd5e1;" />
-                  <p style="margin: 4px 0;"><strong>Patient:</strong> ${formData.patientName} (${formData.age} Yrs)</p>
-                  <p style="margin: 4px 0;"><strong>Mobile:</strong> +91 ${formData.mobileNumber}</p>
-                  <p style="margin: 4px 0;"><strong>Address:</strong> ${formData.address}, ${formData.city} (${formData.pincode})</p>
-                </div>
-              `,
-              confirmButtonColor: '#385FBF',
-              confirmButtonText: 'View Receipt',
-            });
-
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-          } catch (err) {
-            hideLoader();
-            console.error('Payment verify failure:', err);
-            Swal.fire({
-              icon: 'error',
-              title: 'Verification Failed',
-              text:
-                err.response?.data?.error ||
-                err.response?.data?.message ||
-                err.message ||
-                'Backend verification failed. Payment not confirmed.',
-              confirmButtonColor: '#385FBF',
-            });
-          }
+          // Notice: /c2c_app/verify is removed as requested
+          await finalizeBookingSuccess({
+            appointmentNumber,
+            appointmentIndex,
+            paymentId: response.razorpay_payment_id || 'PAY_' + Date.now(),
+          });
         },
         modal: {
           ondismiss: () => {
@@ -794,7 +835,7 @@ const DrAppoint = () => {
             Swal.fire({
               icon: 'info',
               title: 'Payment Window Closed',
-              text: 'The Razorpay payment window was closed before completion. Appointment not confirmed yet.',
+              text: 'The payment window was closed before completion.',
               confirmButtonColor: '#385FBF',
             });
           },
@@ -812,10 +853,19 @@ const DrAppoint = () => {
         });
       });
       rzp.open();
-    } catch (err) {
+    } catch (orderErr) {
       hideLoader();
-      console.error('Booking error:', err);
-      Swal.fire('Booking Failed', 'Unable to open Razorpay payment gateway. Please try again.', 'error');
+      console.error('Agent order creation error:', orderErr);
+      Swal.fire({
+        icon: 'error',
+        title: 'Booking Failed',
+        text:
+          orderErr.response?.data?.error ||
+          orderErr.response?.data?.message ||
+          orderErr.message ||
+          'Server error occurred during booking.',
+        confirmButtonColor: '#385FBF',
+      });
     }
   };
 
@@ -862,8 +912,8 @@ const DrAppoint = () => {
           {bookedAppointment
             ? 'Appointment Receipt'
             : selectedDoctor
-            ? 'Patient & Appointment Details'
-            : 'Doctor Appointment'}
+              ? 'Patient & Appointment Details'
+              : 'Doctor Appointment'}
         </h1>
         <div style={{ width: 36 }}></div>
       </div>
@@ -1635,23 +1685,65 @@ const DrAppoint = () => {
                   </div>
                 </div>
 
-                {/* Consultation Fee Summary & Razorpay Pay Button */}
-                <div style={bookingSummaryBoxStyle}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <span style={{ fontSize: '13px', color: '#64748b' }}>Total Payable Consultation Fee</span>
-                      <h4 style={{ margin: 0, fontSize: '20px', color: '#1e293b', fontWeight: '800' }}>
-                        {selectedDoctor.fee}
-                      </h4>
+                {/* Consultation Fee & Agent Wallet Balance Summary */}
+                {(() => {
+                  const numericFee = getNumericFee();
+                  const isSufficient = walletBalance !== null && walletBalance >= numericFee;
+                  return (
+                    <div style={{
+                      marginTop: '20px',
+                      backgroundColor: '#f8fafc',
+                      border: '1px solid #e2e8f0',
+                      borderRadius: '12px',
+                      padding: '16px',
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                        <div>
+                          <span style={{ fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '600' }}>
+                            Consultation Fee
+                          </span>
+                          <h4 style={{ margin: 0, fontSize: '20px', color: '#1e293b', fontWeight: '800' }}>
+                            {selectedDoctor.fee}
+                          </h4>
+                        </div>
+
+                        <div style={{ textAlign: 'right' }}>
+                          <span style={{ fontSize: '12px', color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px' }}>
+                            <i className="fa-solid fa-wallet" style={{ color: '#385FBF' }}></i>
+                            Agent Wallet Balance:
+                          </span>
+                          <div style={{
+                            fontSize: '17px',
+                            fontWeight: '800',
+                            color: isSufficient ? '#16a34a' : '#dc2626'
+                          }}>
+                            {walletLoading ? 'Checking...' : `₹${Number(walletBalance || 0).toFixed(2)}`}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Insufficient Warning Alert if balance is low */}
+                      {!isSufficient && walletBalance !== null && (
+                        <div style={{
+                          marginTop: '12px',
+                          padding: '10px 12px',
+                          backgroundColor: '#fef2f2',
+                          border: '1px solid #fecaca',
+                          borderRadius: '8px',
+                          fontSize: '12px',
+                          color: '#b91c1c',
+                          fontWeight: '600',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}>
+                          <i className="fa-solid fa-triangle-exclamation"></i>
+                          Aapke wallet me ₹{numericFee.toFixed(2)} se kam balance hai. Appointment book karne ke liye pehle wallet recharge karein.
+                        </div>
+                      )}
                     </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <span style={{ fontSize: '12px', color: '#16a34a', fontWeight: '600' }}>
-                        <i className="fa-solid fa-shield-halved" style={{ marginRight: '4px' }}></i>
-                        100% Secure Razorpay
-                      </span>
-                    </div>
-                  </div>
-                </div>
+                  );
+                })()}
 
                 <div style={{ marginTop: '18px' }}>
                   <button type="submit" style={bookBtnStyle}>
@@ -1862,6 +1954,118 @@ const DrAppoint = () => {
                 </div>
               </div>
 
+              {/* Agent Wallet Payment & Balance Status Card */}
+              {(() => {
+                const numericFee = getNumericFee();
+                const isSufficient = walletBalance !== null && walletBalance >= numericFee;
+                return (
+                  <div style={{
+                    backgroundColor: isSufficient ? '#f0fdf4' : '#fef2f2',
+                    border: `1.5px solid ${isSufficient ? '#86efac' : '#fca5a5'}`,
+                    borderRadius: '12px',
+                    padding: '14px 16px',
+                    marginBottom: '16px',
+                  }}>
+                    <div style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      marginBottom: '10px'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{
+                          width: '32px',
+                          height: '32px',
+                          borderRadius: '50%',
+                          backgroundColor: isSufficient ? '#dcfce7' : '#fee2e2',
+                          color: isSufficient ? '#16a34a' : '#dc2626',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '15px'
+                        }}>
+                          <i className="fa-solid fa-wallet"></i>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '13px', fontWeight: '700', color: '#1e293b' }}>
+                            Agent Wallet Payment
+                          </div>
+                          <div style={{ fontSize: '11px', color: '#64748b' }}>
+                            {walletNumber ? `Wallet: ${walletNumber}` : 'Local Wallet'}
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={fetchAgentWallet}
+                        title="Refresh Balance"
+                        style={{
+                          background: '#ffffff',
+                          border: '1px solid #cbd5e1',
+                          cursor: 'pointer',
+                          color: '#475569',
+                          fontSize: '12px',
+                          padding: '4px 10px',
+                          borderRadius: '6px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '5px'
+                        }}
+                      >
+                        <i className={`fa-solid fa-rotate-right ${walletLoading ? 'fa-spin' : ''}`}></i>
+                        <span style={{ fontSize: '11px', fontWeight: '600' }}>Refresh</span>
+                      </button>
+                    </div>
+
+                    <div style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      padding: '10px 14px',
+                      backgroundColor: '#ffffff',
+                      borderRadius: '8px',
+                      border: '1px solid #e2e8f0',
+                      marginBottom: '10px'
+                    }}>
+                      <div>
+                        <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: '600' }}>
+                          Available Balance
+                        </span>
+                        <div style={{
+                          fontSize: '19px',
+                          fontWeight: '800',
+                          color: isSufficient ? '#16a34a' : '#dc2626'
+                        }}>
+                          {walletLoading ? 'Checking...' : `₹${Number(walletBalance || 0).toFixed(2)}`}
+                        </div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: '600' }}>
+                          Deduction (Fee)
+                        </span>
+                        <div style={{ fontSize: '19px', fontWeight: '800', color: '#1e3a8a' }}>
+                          ₹{numericFee.toFixed(2)}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Status Alert Note */}
+                    {isSufficient ? (
+                      <div style={{ fontSize: '12px', color: '#15803d', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <i className="fa-solid fa-circle-check"></i>
+                        Paryapt balance uplabdh hai. Booking ke baad remaining balance: ₹{(walletBalance - numericFee).toFixed(2)}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: '12px', color: '#b91c1c', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <i className="fa-solid fa-circle-exclamation"></i>
+                        Insufficient Wallet Balance! Required ₹{numericFee.toFixed(2)}, Available ₹{Number(walletBalance || 0).toFixed(2)}. Payment nahi ho sakta.
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* Modal Footer Actions */}
               <div style={{
                 marginTop: '20px',
@@ -1893,27 +2097,37 @@ const DrAppoint = () => {
                   Edit Details
                 </button>
 
-                <button
-                  type="button"
-                  onClick={executeBookingAndPayment}
-                  style={{
-                    padding: '10px 22px',
-                    backgroundColor: '#385FBF',
-                    color: '#ffffff',
-                    border: 'none',
-                    borderRadius: '8px',
-                    fontWeight: '700',
-                    fontSize: '14px',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    boxShadow: '0 4px 10px rgba(56, 95, 191, 0.3)'
-                  }}
-                >
-                  <i className="fa-solid fa-credit-card"></i>
-                  Confirm & Pay ({selectedDoctor.fee})
-                </button>
+                {(() => {
+                  const numericFee = getNumericFee();
+                  const isSufficient = walletBalance !== null && walletBalance >= numericFee;
+                  return (
+                    <button
+                      type="button"
+                      disabled={!isSufficient || walletLoading}
+                      onClick={executeBookingAndPayment}
+                      style={{
+                        padding: '10px 22px',
+                        backgroundColor: isSufficient ? '#385FBF' : '#94a3b8',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: '8px',
+                        fontWeight: '700',
+                        fontSize: '14px',
+                        cursor: isSufficient ? 'pointer' : 'not-allowed',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        boxShadow: isSufficient ? '0 4px 10px rgba(56, 95, 191, 0.3)' : 'none',
+                        opacity: isSufficient ? 1 : 0.7,
+                      }}
+                    >
+                      <i className={`fa-solid ${isSufficient ? 'fa-calendar-check' : 'fa-ban'}`}></i>
+                      {isSufficient
+                        ? `Confirm & Book (${selectedDoctor.fee})`
+                        : `Insufficient Balance (₹${Number(walletBalance || 0).toFixed(2)})`}
+                    </button>
+                  );
+                })()}
               </div>
             </div>
           </div>

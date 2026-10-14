@@ -3,8 +3,7 @@ import Swal from 'sweetalert2';
 import { useLoader } from '../loader/LoaderContext'; 
 import axios from 'axios';
 import { useLocation, useNavigate } from 'react-router-dom';
-
-const BASE_URL = 'http://192.168.29.39:5001/badri_enterprises/localprime';
+import { BASE_URL } from '../config/api';
 
 const loanService = {
   receiveCustomerPayment: async (payload) => {

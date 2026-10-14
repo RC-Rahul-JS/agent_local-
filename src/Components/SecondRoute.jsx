@@ -89,8 +89,9 @@ useEffect(() => {
 
     const fetchWalletDetails = async () => {
       try {
+        const headers = { 'ngrok-skip-browser-warning': 'true' };
         // First, get the wallet list to find the wallet_id for the current agent
-        const listRes = await axios.get(`${BASE_URL}/wallet/list`);
+        const listRes = await axios.get(`${BASE_URL}/wallet/list`, { timeout: 30000, headers });
         const wallets = listRes.data?.data || [];
         
         // Find wallet matching the current UID (agentCode)
@@ -101,7 +102,8 @@ useEffect(() => {
 
         if (match) {
           // Now fetch the exact wallet details
-          const detailsRes = await axios.get(`${BASE_URL}/wallet/details?wallet_id=${match._id}`);
+          const detailsRes = await axios.get(`${BASE_URL}/wallet/details?wallet_id=${match._id}`, { timeout: 30000, headers });
+
           if (detailsRes.data && detailsRes.data.success && detailsRes.data.data?.wallet) {
             const w = detailsRes.data.data.wallet;
             
@@ -142,8 +144,9 @@ useEffect(() => {
 
     const fetchApiTransactions = async () => {
       try {
-        // showLoader();
-        const res = await axios.get(`${BASE_URL}/wallet/transactions?wallet_id=${walletId}&page=${currentPage}&limit=10`);
+        const headers = { 'ngrok-skip-browser-warning': 'true' };
+        const res = await axios.get(`${BASE_URL}/wallet/transactions?wallet_id=${walletId}&page=${currentPage}&limit=10`, { timeout: 30000, headers });
+
         if (res.data && res.data.success) {
            setApiTransactions(res.data.data || []);
            // If backend returns total_pages use it, otherwise use total_count if available

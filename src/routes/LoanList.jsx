@@ -6,6 +6,8 @@ import "react-datepicker/dist/react-datepicker.css";
 import personalLoanAnim from '../Components/personalLoanAnim.json'
 import { useNavigate } from 'react-router-dom';
 
+import { BASE_URL } from '../config/api';
+
 const shimmerStyle = {
   backgroundColor: '#f6f7f8',
   backgroundImage: 'linear-gradient(to right, #eeeeee 0%, #dddddd 50%, #eeeeee 100%)',
@@ -51,18 +53,19 @@ const LoanList = () => {
   const fetchLoans = async (uid) => {
     setShimmer(true);
     try {
-      const BASE_URL = 'http://192.168.29.39:5001/badri_enterprises/localprime';
+      const headers = { 'ngrok-skip-browser-warning': 'true' };
+      const timeout = 30000;
       
       const [loansRes, membersRes, agentsRes] = await Promise.all([
-        axios.get(`${BASE_URL}/loans`).catch((err) => {
+        axios.get(`${BASE_URL}/loans`, { headers, timeout }).catch((err) => {
           console.error('Loans fetch error', err);
           return { data: [] };
         }),
-        axios.get(`${BASE_URL}/get-members`).catch((err) => {
+        axios.get(`${BASE_URL}/get-members`, { headers, timeout }).catch((err) => {
           console.error('Members fetch error', err);
           return { data: [] };
         }),
-        axios.get(`${BASE_URL}/agents`).catch((err) => {
+        axios.get(`${BASE_URL}/agents`, { headers, timeout }).catch((err) => {
           console.error('Agents fetch error', err);
           return { data: [] };
         })
@@ -169,7 +172,7 @@ const LoanList = () => {
       <div style={{ padding: 20 }}>
         {accounts.length === 0 && !shimmer ? (
            <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
-               No Approved Loans found for this Agent on server 192.168.29.39:5001
+               No Approved Loans found for this Agent
            </div>
         ) : null}
 
