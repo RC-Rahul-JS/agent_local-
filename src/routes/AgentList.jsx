@@ -31,8 +31,12 @@ const AgentList = () => {
   const fetchAgents = async () => {
     setLoading(true);
     try {
-      const url = `${BASE_URL}/agents`;
-      const res = await axios.get(url);
+      const agentCode = localStorage.getItem('agentCode') || localStorage.getItem('AUID') || '';
+      const url = agentCode ? `${BASE_URL}/agents?IntroCode=${agentCode}` : `${BASE_URL}/agents`;
+      console.log(url)
+      const res = await axios.get(url, {
+        headers: { 'ngrok-skip-browser-warning': 'true' },
+      });
 
       let list = [];
       if (Array.isArray(res.data)) {

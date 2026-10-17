@@ -29,6 +29,7 @@ import CommissionSlabList from './routes/CommissionSlabList'
 import ViewCommission1 from './routes/vc2'
 import DrAppoint from './routes/DrAppoint'
 import AppointlmentList from './routes/AppointlmentList'
+import ChannelPartner from './routes/ChannelPartner'
 
 import Swal from 'sweetalert2';
 
@@ -226,6 +227,14 @@ function App() {
           element={
             <PrivateRoute>
               <CommissionSlabList/>
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/channel-partner"
+          element={
+            <PrivateRoute>
+              <ChannelPartner/>
             </PrivateRoute>
           }
         />
