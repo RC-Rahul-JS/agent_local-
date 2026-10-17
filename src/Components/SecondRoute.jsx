@@ -1,575 +1,714 @@
-
-
-import React, { useEffect, useState } from "react";
-import { database } from "../DB/Firebase";
-import { ref, query, orderByChild, equalTo, onValue, off, push, set } from 'firebase/database';
-import { getStorage, ref as sref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import React, { useEffect, useState, useCallback } from "react";
 import moment from "moment";
-import UploadFile from "./UploadFile";
 import { useLoader } from "../loader/LoaderContext";
 import { toast } from "react-toastify";
 import axios from "axios";
-import { BASE_URL } from "../config/api";
+import { BASE_URL, DOMAIN, API_URL } from "../config/api";
 
 const WalletScreen = () => {
-  const transactions = [
-    { type: "pending", label: "Cash Deposit", date: "Jan 13th 25", amount: -20 },
-    { type: "pending", label: "Cash Deposit", date: "Jan 11th 25", amount: -2520 },
-    { type: "pending", label: "Cash Deposit", date: "Jan 11th 25", amount: -2520 },
-    { type: "receipt", label: "EMI-Receipt 00120500001", date: "Oct 23rd 25", amount: 381 },
-    { type: "receipt", label: "EMI-Receipt 00120500001", date: "Oct 23rd 25", amount: 381 },
-    { type: "receipt", label: "EMI-Receipt 00120300001", date: "Aug 30th 25", amount: 120 },
-    { type: "receipt", label: "EMI-Receipt 00120500001", date: "Aug 20th 25", amount: 120 },
-  ];
   const { showLoader, hideLoader } = useLoader();
-  
-  const [TransitionData, setTransitionData] = useState([])
 
-  const [userdata, setuserdata] = useState({})
+  // Active Tab: 'limit' | 'wallet'
+  const [activeTab, setActiveTab] = useState('limit');
 
-  const [showdeposit, setshowdeposit] = useState(false)
-  
-  // API Pagination States
+  // Limit Wallet States
+  const [userdata, setuserdata] = useState({});
   const [apiTransactions, setApiTransactions] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [walletId, setWalletId] = useState(null);
-  
- const [UID, setUID] = useState('')
-useEffect(() => {
- setUID(localStorage.getItem("AUID"))
- console.log(localStorage.getItem("AUID"))
-}, [])
 
-        const [openlink, setopenlink] = useState(false)
+  // Saving Wallet States
+  const [savingWalletData, setSavingWalletData] = useState(null);
+  const [savingWalletId, setSavingWalletId] = useState(null);
+  const [savingTransactions, setSavingTransactions] = useState([]);
+  const [savingCurrentPage, setSavingCurrentPage] = useState(1);
 
-  const generatePDF = async () => {
-    // Example HTML content
-    const htmlContent = `
-      <h1 style="text-align: center;">My PDF Page</h1>
-      <p>This is a sample PDF generated from a React Native page.</p>
-    `;
+  // Agent UID from LocalStorage
+  const [UID, setUID] = useState('');
+  useEffect(() => {
+    setUID(localStorage.getItem("AUID") || '');
+  }, []);
 
+  // Modal & Deposit Form States
+  const [openlink, setopenlink] = useState(false);
+  const [amount, setamount] = useState('');
+  const [proofurl, setproofurl] = useState(null);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [loaderreq, setloaderreq] = useState(false);
+  const [bankledger, setbankledger] = useState('');
+  const [lData, setlData] = useState([]);
+
+  // Fetch Ledger Data for Bank Dropdown from ${API_URL}/ledgers
+  const getData = async () => {
+    const api = `${API_URL}/ledgers`;
     try {
-      if (Platform.OS === 'android') {
-        const granted = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE
-        );
-        if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
-          console.log('Permission denied');
+      const headers = { 'ngrok-skip-browser-warning': 'true' };
+      const res = await axios.get(api, { timeout: 30000, headers });
+      if (res && res.data) {
+        const list = Array.isArray(res.data)
+          ? res.data
+          : (res.data.data || Object.values(res.data));
+        setlData(list);
+      }
+    } catch (error) {
+      console.error('Error fetching bank ledger data:', error);
+    }
+  };
+
+  useEffect(() => {
+    getData();
+  }, []);
+
+  // 1. Fetch Limit Wallet Details
+  const fetchWalletDetails = useCallback(async () => {
+    if (!UID) return;
+    try {
+      const headers = { 'ngrok-skip-browser-warning': 'true' };
+      const listRes = await axios.get(`${BASE_URL}/wallet/list`, { timeout: 30000, headers });
+      const wallets = listRes.data?.data || [];
+
+      const match = wallets.find(w => 
+        (w.agentCode || '').toLowerCase() === UID.toLowerCase() ||
+        (w.agent_id || '').toLowerCase() === UID.toLowerCase()
+      );
+
+      if (match) {
+        const detailsRes = await axios.get(`${BASE_URL}/wallet/details?wallet_id=${match._id}`, { timeout: 30000, headers });
+
+        if (detailsRes.data && detailsRes.data.success && detailsRes.data.data?.wallet) {
+          const w = detailsRes.data.data.wallet;
+          const mappedData = {
+            ...w,
+            Amount: w.creditLimit || 0,
+            Balance: w.availableCredit || 0,
+            MemberName: w.agentName || w.MemberName || '',
+            LoanCode: w.walletNumber || w.LoanCode || '',
+            BranchCode: w.branchCode || w.BranchCode || '',
+          };
+
+          setuserdata(mappedData);
+          setWalletId(match._id);
+
+          // Once agentMongoId is identified, cache and fetch saving wallet directly
+          if (w.agent_id) {
+            localStorage.setItem('agent_id', w.agent_id);
+            fetchSavingWalletDetails(w.agent_id);
+          }
+        }
+      } else {
+        console.warn('No limit wallet found for agent:', UID);
+      }
+    } catch (error) {
+      console.error('Error fetching limit wallet details:', error);
+    }
+  }, [UID]);
+
+  useEffect(() => {
+    fetchWalletDetails();
+  }, [fetchWalletDetails]);
+
+  // 2. Fetch Limit Wallet Transactions
+  const fetchApiTransactions = useCallback(async () => {
+    if (!walletId) return;
+    try {
+      const headers = { 'ngrok-skip-browser-warning': 'true' };
+      const res = await axios.get(`${BASE_URL}/wallet/transactions?wallet_id=${walletId}&page=${currentPage}&limit=10`, { timeout: 30000, headers });
+
+      if (res.data && res.data.success) {
+        setApiTransactions(res.data.data || []);
+        const calcPages = res.data.total_pages || Math.ceil((res.data.total_count || 1) / 10) || 1;
+        setTotalPages(calcPages);
+      }
+    } catch (err) {
+      console.error('Error fetching limit transactions:', err);
+    }
+  }, [walletId, currentPage]);
+
+  useEffect(() => {
+    fetchApiTransactions();
+  }, [fetchApiTransactions]);
+
+  // 3. Fetch Saving Wallet Details & Transactions directly by agent_id
+  const fetchSavingWalletDetails = useCallback(async (agentMongoId) => {
+    const aid = agentMongoId || userdata?.agent_id || localStorage.getItem('agent_id');
+    if (!aid) return;
+    try {
+      const headers = { 'ngrok-skip-browser-warning': 'true' };
+      const res = await axios.get(`${BASE_URL}/saving-wallet/details?agent_id=${aid}`, { timeout: 30000, headers });
+      if (res.data?.success && res.data?.data) {
+        if (res.data.data.wallet) {
+          setSavingWalletData(res.data.data.wallet);
+          setSavingWalletId(res.data.data.wallet._id);
+        }
+        if (res.data.data.transactions) {
+          setSavingTransactions(res.data.data.transactions);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching saving wallet details directly by agent_id:', err);
+    }
+  }, [userdata?.agent_id]);
+
+  // 4. Fetch Saving Wallet Transactions
+  const fetchSavingTransactions = useCallback(async (sWalletId) => {
+    const targetId = sWalletId || savingWalletId;
+    const aid = userdata?.agent_id || localStorage.getItem('agent_id');
+    try {
+      const headers = { 'ngrok-skip-browser-warning': 'true' };
+      if (aid) {
+        const res = await axios.get(`${BASE_URL}/saving-wallet/details?agent_id=${aid}`, { timeout: 30000, headers });
+        if (res.data?.success && res.data?.data) {
+          if (res.data.data.wallet) {
+            setSavingWalletData(res.data.data.wallet);
+            setSavingWalletId(res.data.data.wallet._id);
+          }
+          if (res.data.data.transactions) {
+            setSavingTransactions(res.data.data.transactions);
+          }
           return;
         }
       }
-
-      const options = {
-        html: htmlContent,
-        fileName: 'example',
-        directory: 'Documents',
-      };
-
-      const file = await RNHTMLtoPDF.convert(options);
-      console.log('PDF generated:', file.filePath);
-      alert(`PDF saved at: ${file.filePath}`);
-    } catch (error) {
-      console.error('Error generating PDF:', error);
+      if (targetId) {
+        const res = await axios.get(`${BASE_URL}/saving-wallet/transactions?wallet_id=${targetId}`, { timeout: 30000, headers });
+        if (res.data && res.data.success) {
+          setSavingTransactions(res.data.data || []);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching saving wallet transactions:', err);
     }
+  }, [savingWalletId, userdata?.agent_id]);
+
+  useEffect(() => {
+    if (activeTab === 'wallet') {
+      const aid = userdata?.agent_id || localStorage.getItem('agent_id');
+      if (aid) {
+        fetchSavingWalletDetails(aid);
+      } else if (savingWalletId) {
+        fetchSavingTransactions(savingWalletId);
+      }
+    }
+  }, [activeTab, savingWalletId, userdata?.agent_id, fetchSavingTransactions, fetchSavingWalletDetails]);
+
+  // Handle open deposit modal
+  const handleOpenDepositModal = () => {
+    if (activeTab === 'limit') {
+      const calcAmount = userdata.Amount !== undefined && userdata.Balance !== undefined
+        ? Math.max(0, userdata.Amount - userdata.Balance).toFixed(2)
+        : '';
+      setamount(calcAmount);
+    } else {
+      setamount('');
+    }
+    setSelectedFile(null);
+    setopenlink(true);
   };
 
+  // Submit Deposit Request (Limit or Saving Wallet)
+  const requestpost = async () => {
+    const isSaving = activeTab === 'wallet';
+    const depositAmount = parseFloat(amount);
 
-   // Simulate getting UID from localStorage (or however you're storing it)
-//    useEffect(() => {
-//     const value = localStorage.getItem('AUID');
-//     if (value) {
-//       setUID(value);
-//     }
-//   }, []);
+    if (!depositAmount || depositAmount <= 0) {
+      toast.error("Please enter a valid deposit amount");
+      return;
+    }
 
-  useEffect(() => {
-    if (!UID) return;
+    if (!isSaving) {
+      const maxAllowed = userdata.Amount !== undefined && userdata.Balance !== undefined
+        ? userdata.Amount - userdata.Balance
+        : null;
 
-    const fetchWalletDetails = async () => {
-      try {
-        const headers = { 'ngrok-skip-browser-warning': 'true' };
-        // First, get the wallet list to find the wallet_id for the current agent
-        const listRes = await axios.get(`${BASE_URL}/wallet/list`, { timeout: 30000, headers });
-        const wallets = listRes.data?.data || [];
-        
-        // Find wallet matching the current UID (agentCode)
-        const match = wallets.find(w => 
-          (w.agentCode || '').toLowerCase() === UID.toLowerCase() ||
-          (w.agent_id || '').toLowerCase() === UID.toLowerCase()
-        );
-
-        if (match) {
-          // Now fetch the exact wallet details
-          const detailsRes = await axios.get(`${BASE_URL}/wallet/details?wallet_id=${match._id}`, { timeout: 30000, headers });
-
-          if (detailsRes.data && detailsRes.data.success && detailsRes.data.data?.wallet) {
-            const w = detailsRes.data.data.wallet;
-            
-            // Map the API fields to the old Firebase logic expected by the UI
-            const mappedData = {
-              ...w,
-              Amount: w.creditLimit || 0,
-              Balance: w.availableCredit || 0,
-              MemberName: w.agentName || w.MemberName || '',
-              LoanCode: w.walletNumber || w.LoanCode || '',
-              BranchCode: w.branchCode || w.BranchCode || '',
-            };
-            
-            setuserdata(mappedData);
-            
-            // calculate the allowed deposit amount (Total Limit - Current Balance)
-            const calculatedAmount = (mappedData.Amount - mappedData.Balance).toFixed(2);
-            setamount(calculatedAmount);
-            console.log("Mapped Wallet Data:", mappedData);
-            
-            // Set wallet ID for transactions API
-            setWalletId(match._id);
-          }
-        } else {
-          console.warn('No wallet found for agent:', UID);
-        }
-      } catch (error) {
-        console.error('Error fetching wallet details:', error);
+      if (maxAllowed !== null && depositAmount > maxAllowed) {
+        toast.error(`Amount cannot exceed ₹${maxAllowed.toFixed(2)}`);
+        return;
       }
-    };
+    }
 
-    fetchWalletDetails();
-  }, [UID]);
-  
-  // Fetch paginated transactions from API
-  useEffect(() => {
-    if (!walletId) return;
+    if (!bankledger) {
+      toast.error("Please select a bank");
+      return;
+    }
 
-    const fetchApiTransactions = async () => {
-      try {
-        const headers = { 'ngrok-skip-browser-warning': 'true' };
-        const res = await axios.get(`${BASE_URL}/wallet/transactions?wallet_id=${walletId}&page=${currentPage}&limit=10`, { timeout: 30000, headers });
+    if (!selectedFile) {
+      toast.error("Please select a document/slip to upload");
+      return;
+    }
+
+    showLoader();
+    setloaderreq(true);
+
+    try {
+      // 1. Upload doc/image to AWS S3 endpoint
+      const formData = new FormData();
+      formData.append("image", selectedFile);
+
+      const uploadRes = await axios.post(`${DOMAIN}/duniyape/aws/upload`, formData, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      });
+
+      const docUrl = uploadRes.data?.url;
+      if (!docUrl) {
+        throw new Error(uploadRes.data?.error || uploadRes.data?.message || "Failed to upload document");
+      }
+
+      setproofurl(docUrl);
+
+      // 2. Bank details
+      const selectedBank = lData.find((item) =>
+        item.Code === bankledger || item._id === bankledger || item.Pushkey === bankledger
+      );
+      const bankName = selectedBank ? selectedBank.LedgerName : "";
+
+      // 3. Post to respective backend endpoint
+      if (isSaving) {
+        const payload = {
+          amount: depositAmount,
+          agent_id: savingWalletData?.agent_id || userdata?.agent_id || UID,
+          wallet_id: savingWalletData?._id || savingWalletId,
+          bank_name: bankName,
+          bank_ledger_id: bankledger,
+          doc_url: docUrl,
+        };
+
+        const res = await axios.post(`${BASE_URL}/saving-wallet/add-money-requests`, payload, {
+          headers: {
+            "Content-Type": "application/json",
+            "ngrok-skip-browser-warning": "true",
+          },
+        });
 
         if (res.data && res.data.success) {
-           setApiTransactions(res.data.data || []);
-           // If backend returns total_pages use it, otherwise use total_count if available
-           const calcPages = res.data.total_pages || Math.ceil((res.data.total_count || 1) / 10) || 1;
-           setTotalPages(calcPages);
+          toast.success(res.data.message || "Saving wallet deposit request submitted successfully");
+          setopenlink(false);
+          setSelectedFile(null);
+          setproofurl(null);
+          setbankledger("");
+
+          // Refresh saving wallet
+          fetchSavingWalletDetails(savingWalletData?.agent_id || userdata?.agent_id);
+          fetchSavingTransactions(savingWalletData?._id || savingWalletId);
+        } else {
+          toast.error(res.data?.message || "Failed to submit request");
         }
-      } catch (err) {
-        console.error('Error fetching API transactions:', err);
-      } finally {
-        // hideLoader();
-      }
-    };
+      } else {
+        const payload = {
+          amount: depositAmount,
+          agent_id: userdata.agent_id || UID,
+          bank_name: bankName,
+          bank_ledger_id: bankledger,
+          doc_url: docUrl,
+        };
 
-    fetchApiTransactions();
-  }, [walletId, currentPage]);
-  
-  useEffect(() => {
-    if (!userdata?.LoanCode) return;
-
-    const q = query(
-      ref(database, '/loan/loanstatement/'),
-      orderByChild('AccountNumber'),
-      equalTo(userdata.LoanCode)
-    );
-
-    const handleData = (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        const list = Object.values(data);
-        setTransitionData(list);
-        console.log(list);
-      }
-    };
-
-    onValue(q, handleData);
-
-    // Cleanup listener on unmount or dependency change
-    return () => off(q, 'value', handleData);
-  }, [userdata, setTransitionData]);
-
-
-
-const [Pendingreq, setPendingreq] = useState([])
-useEffect(() => {
-    if (!UID) return;
-
-    const q = query(
-      ref(database, '/Requests/Agentdeposit/'),
-      orderByChild('agentid'),
-      equalTo(UID)
-    );
-
-    const handleData = (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        const filtered = Object.values(data).filter(item => item.status === 'pending');
-        setPendingreq(filtered);
-        // console.log(filtered);
-      }
-    };
-
-    onValue(q, handleData);
-
-    // Cleanup listener
-    return () => off(q, 'value', handleData);
-  }, [UID, setPendingreq]);
-
-
-
-const [amount, setamount] = useState('')
-const [proofurl, setproofurl] = useState(null)
-
-const [loaderreq, setloaderreq] = useState(false)
-const [bankledger, setbankledger] = useState('')
-
-// const requestpost=async()=>{
-
-// if (proofurl&&amount>0&&amount<=(userdata.Amount-userdata.Balance)) {
-// setloaderreq(true)
-//   const mykey = database().ref('/Requests/Agentdeposit/').push().key
-//   let img=await UploadDoc(proofurl,mykey)
-
-//     database()
-//     .ref('/Requests/Agentdeposit/'+mykey)
-//     .update({
-//       date : moment(new Date()).format('yyyy-MM-DD'),
-//       amount : amount,
-//       agentid : UID,
-//       account : userdata.LoanCode,
-//       agentname : userdata.MemberName,
-//       key : mykey,
-//       status : 'pending',
-//       url : img,
-//       bankledger : bankledger,
-//       branchcode : userdata.BranchCode
-//     })
-  
-//   .then(async() => {setshowdeposit(false);setproofurl(null);setloaderreq(false)});
-// }}
-
-const requestpost = async () => {
-  showLoader()
-    try {
-      if (
-        proofurl &&
-        amount > 0 &&
-        amount <= (userdata.Amount - userdata.Balance)
-      ) {
-        setloaderreq(true);
-        const newRef = push(ref(database, '/Requests/Agentdeposit/'));
-        const mykey = newRef.key;
-        await set(newRef, {
-          date: moment().format('YYYY-MM-DD'),
-          amount: amount,
-          agentid: UID,
-          account: userdata.LoanCode,
-          agentname: userdata.MemberName,
-          key: mykey,
-          status: 'pending',
-          url: proofurl,
-          bankledger: bankledger,
-          branchcode: userdata.BranchCode,
+        const res = await axios.post(`${BASE_URL}/wallet/add-money-requests`, payload, {
+          headers: {
+            "Content-Type": "application/json",
+            "ngrok-skip-browser-warning": "true",
+          },
         });
-  
-        setshowdeposit(false);
-        setproofurl(null);
-        setloaderreq(false);
-        setopenlink(false)
-        toast.success("Successful")
-      }
-    } catch (error) {
-      console.error('Error during request post:', error);
-      setloaderreq(false);
-    }finally{
-      hideLoader()
-    }
-  };
 
-const UploadDoc = async (file, user) => {
-    try {
-      const storage = getStorage(); // Make sure Firebase is initialized properly
-      const storageRef = sref(storage, `Agent-req-doc/${user}`);
-  
-      // Upload the file (file is a Blob or File object)
-      await uploadBytes(storageRef, file);
-  
-      // Get the file's download URL
-      const url = await getDownloadURL(storageRef);
-  
-      console.log(url);
-      return url;
-    } catch (error) {
-      console.error('File upload failed:', error);
-      return null;
-    }
-  };
+        if (res.data && res.data.success) {
+          toast.success(res.data.message || "Limit deposit request submitted successfully");
+          setopenlink(false);
+          setSelectedFile(null);
+          setproofurl(null);
+          setbankledger("");
 
-  const [lData, setlData] = useState([])
-const getData = async()=>{
-
-        const api = 'https://api.duniyamart.duniyape.in/get-ledger/I89nD59Ra69j0ee512TsW143eEt03u'
-        try{
-          const res = await axios.get(api);
-          if(res){
-            setlData(Object.values(res.data));
-            console.log(Object.values(res.data));
-          }
-          
-        }catch(error){
-          console.log(error);
+          // Refresh limit wallet
+          fetchWalletDetails();
+          fetchApiTransactions();
+        } else {
+          toast.error(res.data?.message || "Failed to submit request");
         }
       }
-    
-      useEffect(() => {
-          getData();
-        }, [])
+    } catch (error) {
+      console.error("Error submitting deposit request:", error);
+      const errMsg = error.response?.data?.message || error.response?.data?.error || error.message || "Failed to submit request";
+      toast.error(errMsg);
+    } finally {
+      setloaderreq(false);
+      hideLoader();
+    }
+  };
 
- 
+  // Helper values for current active tab
+  const isSaving = activeTab === 'wallet';
+  const memberName = isSaving
+    ? (savingWalletData?.agentName || userdata.MemberName || '')
+    : (userdata.MemberName || '');
+  const accountCode = isSaving
+    ? (savingWalletData?.walletNumber || 'Saving Wallet')
+    : (userdata.LoanCode || '');
+  const currentBalance = isSaving
+    ? (savingWalletData?.balance ?? 0)
+    : (userdata.Balance ?? 0);
+
+  // Pagination for saving wallet
+  const savingPageSize = 10;
+  const savingTotalPages = Math.max(1, Math.ceil(savingTransactions.length / savingPageSize));
+  const paginatedSavingTxns = savingTransactions.slice(
+    (savingCurrentPage - 1) * savingPageSize,
+    savingCurrentPage * savingPageSize
+  );
 
   return (
     <div style={styles.container}>
+      {/* ── TOP TABS / PILLS ─────────────────────────────────── */}
+      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '18px' }}>
+        <div style={{
+          display: 'flex',
+          backgroundColor: '#EAE3D3',
+          borderRadius: '9999px',
+          padding: '4px',
+          gap: '6px',
+          width: '100%',
+          maxWidth: '380px',
+          border: '1px solid #d4cbb8'
+        }}>
+          <button
+            type="button"
+            onClick={() => setActiveTab('limit')}
+            style={{
+              flex: 1,
+              padding: '10px 18px',
+              borderRadius: '9999px',
+              border: 'none',
+              fontWeight: '700',
+              fontSize: '15px',
+              cursor: 'pointer',
+              transition: 'all 0.25s ease',
+              backgroundColor: activeTab === 'limit' ? '#514579' : 'transparent',
+              color: activeTab === 'limit' ? '#ffffff' : '#6b7280',
+              boxShadow: activeTab === 'limit' ? '0 3px 10px rgba(81, 69, 121, 0.35)' : 'none'
+            }}
+          >
+            Limit
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('wallet')}
+            style={{
+              flex: 1,
+              padding: '10px 18px',
+              borderRadius: '9999px',
+              border: 'none',
+              fontWeight: '700',
+              fontSize: '15px',
+              cursor: 'pointer',
+              transition: 'all 0.25s ease',
+              backgroundColor: activeTab === 'wallet' ? '#514579' : 'transparent',
+              color: activeTab === 'wallet' ? '#ffffff' : '#6b7280',
+              boxShadow: activeTab === 'wallet' ? '0 3px 10px rgba(81, 69, 121, 0.35)' : 'none'
+            }}
+          >
+            Wallet
+          </button>
+        </div>
+      </div>
+
+      {/* ── HEADER CARD ─────────────────────────────────────── */}
       <div style={styles.header}>
         <div style={styles.profileRow}>
-          {userdata.MemberName&&<div style={styles.avatar}>{userdata.MemberName.split(' ').map(word => word.charAt(0).toUpperCase()).join('')}</div>}
+          {memberName && (
+            <div style={styles.avatar}>
+              {memberName.split(' ').map(word => word.charAt(0).toUpperCase()).join('')}
+            </div>
+          )}
           <div style={styles.userInfo}>
-            <div><strong>{userdata.MemberName}</strong></div>
-            <div>{userdata.LoanCode}</div>
+            <div><strong>{memberName}</strong></div>
+            <div style={{ color: '#555', fontSize: '13px' }}>{accountCode}</div>
           </div>
         </div>
         <div style={styles.balanceRow}>
-          Current Balance: <span style={styles.balanceValue}>₹{userdata.Balance}</span>
+          Current Balance: <span style={styles.balanceValue}>₹{currentBalance}</span>
         </div>
-        <div style={styles.limitText}>Total Limit: ₹{userdata.Amount}</div>
-        <button onClick={()=>setopenlink(true)} style={styles.depositBtn}>Bank Deposit</button>
+        {!isSaving ? (
+          <div style={styles.limitText}>Total Limit: ₹{userdata.Amount || 0}</div>
+        ) : (
+          <div style={styles.limitText}>
+            Total Deposited: ₹{savingWalletData?.totalDeposit ?? 0}
+          </div>
+        )}
+        <button onClick={handleOpenDepositModal} style={styles.depositBtn}>
+          Bank Deposit
+        </button>
       </div>
 
-      {/* Title for Transactions */}
-      <h3 style={{marginTop: 0, marginBottom: '15px', color: '#514579'}}>Wallet Transactions</h3>
+      {/* ── TRANSACTIONS TITLE ──────────────────────────────── */}
+      <h3 style={{ marginTop: 0, marginBottom: '15px', color: '#514579' }}>
+        {isSaving ? "Saving Wallet Transactions" : "Wallet Transactions"}
+      </h3>
 
-      {/* NEW MONGODB API TRANSACTIONS WITH PAGINATION */}
-      {apiTransactions.map((item, index) => (
-        <div key={`api-${index}`} style={{...styles.transaction, backgroundColor:'#F5F1E7'}}>
-          <div>
-            <div style={{ display: "flex", alignItems: "center" }}>
-                <div style={{display:'grid',placeItems:'center',background:'white',borderRadius:"50%",width:30,height:30,marginRight:10}}>
-                    <span style={{fontSize: 20,fontWeight:"bold",color:item.type==='withdraw'?'red':'green' }}>
-                        {item.type==='withdraw' ? "↑" : "↓"}
-                    </span>
+      {/* ── TRANSACTIONS LIST ───────────────────────────────── */}
+      {!isSaving ? (
+        // LIMIT TRANSACTIONS (PAGINATED FROM API)
+        <>
+          {apiTransactions.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '30px 0', color: '#777' }}>
+              No transactions found
+            </div>
+          ) : (
+            apiTransactions.map((item, index) => {
+              const isWithdraw = item.type === 'withdraw';
+              return (
+                <div key={`api-${index}`} style={{ ...styles.transaction, backgroundColor: '#F5F1E7' }}>
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center" }}>
+                      <div style={{ display: 'grid', placeItems: 'center', background: 'white', borderRadius: "50%", width: 32, height: 32, marginRight: 10 }}>
+                        <span style={{ fontSize: 18, fontWeight: "bold", color: isWithdraw ? 'red' : 'green' }}>
+                          {isWithdraw ? "↑" : "↓"}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        <span style={{ textTransform: 'capitalize', fontWeight: 'bold' }}>
+                          {item.type ? item.type.replace(/_/g, ' ') : 'Transaction'} {item.status ? `( ${item.status} )` : ''}
+                        </span>
+                        <div style={{ fontSize: 12, color: '#666' }}>
+                          {item.created_at ? moment(item.created_at).format("MMM Do YY, h:mm a") : ''}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ fontWeight: "bold", color: isWithdraw ? 'red' : 'green', fontSize: 15 }}>
+                    {isWithdraw ? '-' : '+'}{item.amount ? item.amount : 0}
+                  </div>
                 </div>
-            <div style={{display:'flex',flexDirection:'column'}}>
-              <span style={{textTransform: 'capitalize', fontWeight: 'bold'}}>{item.type} {item.status ? `( ${item.status} )` : ''}</span>
-              <div style={{ fontSize: 12 }}>{item.created_at ? moment(item.created_at).format("MMM Do YY, h:mm a") : ''}</div>
-            </div>
-            </div>
-          </div>
-          <div style={{ fontWeight: "bold",color:item.type==='withdraw'?'red':'green'}}>
-            {item.type==='withdraw'?'-':'+'}{item.amount ? item.amount : 0}
-          </div>
-        </div>
-      ))}
+              );
+            })
+          )}
 
-      {/* Pagination Controls */}
-      {totalPages > 0 && (
-        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding: '10px 0', borderBottom: '1px solid #ccc', marginBottom: '15px'}}>
-          <button 
-            disabled={currentPage === 1}
-            onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-            style={{...styles.depositBtn, marginTop: 0, opacity: currentPage === 1 ? 0.5 : 1}}
-          >
-            Prev
-          </button>
-          <span style={{fontWeight: 'bold'}}>Page {currentPage} of {totalPages}</span>
-          <button 
-            disabled={currentPage === totalPages}
-            onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-            style={{...styles.depositBtn, marginTop: 0, opacity: currentPage === totalPages ? 0.5 : 1}}
-          >
-            Next
-          </button>
-        </div>
+          {/* Pagination Controls for Limit */}
+          {totalPages > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #ccc', marginBottom: '15px' }}>
+              <button 
+                disabled={currentPage === 1}
+                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                style={{ ...styles.depositBtn, marginTop: 0, opacity: currentPage === 1 ? 0.5 : 1 }}
+              >
+                Prev
+              </button>
+              <span style={{ fontWeight: 'bold' }}>Page {currentPage} of {totalPages}</span>
+              <button 
+                disabled={currentPage === totalPages}
+                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                style={{ ...styles.depositBtn, marginTop: 0, opacity: currentPage === totalPages ? 0.5 : 1 }}
+              >
+                Next
+              </button>
+            </div>
+          )}
+        </>
+      ) : (
+        // SAVING WALLET TRANSACTIONS (PAGINATED CLIENT-SIDE)
+        <>
+          {paginatedSavingTxns.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '30px 0', color: '#777' }}>
+              No saving wallet transactions found
+            </div>
+          ) : (
+            paginatedSavingTxns.map((item, index) => {
+              const isWithdraw = item.type === 'withdraw';
+              const isPending = item.status === 'pending';
+              const isRejected = item.status === 'rejected';
+
+              let iconSymbol = isWithdraw ? "↑" : "↓";
+              let iconColor = isWithdraw ? "red" : (isPending ? "#918405" : "green");
+              if (isRejected) {
+                iconSymbol = "✕";
+                iconColor = "red";
+              }
+
+              let amountColor = isWithdraw ? "red" : (isPending ? "#918405" : "green");
+              if (isRejected) amountColor = "gray";
+
+              return (
+                <div key={`saving-${index}`} style={{ ...styles.transaction, backgroundColor: '#F5F1E7' }}>
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center" }}>
+                      <div style={{ display: 'grid', placeItems: 'center', background: 'white', borderRadius: "50%", width: 32, height: 32, marginRight: 10 }}>
+                        <span style={{ fontSize: 18, fontWeight: "bold", color: iconColor }}>
+                          {iconSymbol}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        <span style={{ textTransform: 'capitalize', fontWeight: 'bold' }}>
+                          {item.type ? item.type.replace(/_/g, ' ') : 'Transaction'} {item.status ? `( ${item.status} )` : ''}
+                        </span>
+                        <div style={{ fontSize: 12, color: '#666' }}>
+                          {item.created_at ? moment(item.created_at).format("MMM Do YY, h:mm a") : ''}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ fontWeight: "bold", color: amountColor, fontSize: 15 }}>
+                    {isWithdraw ? '-' : '+'}{item.amount ? item.amount : 0}
+                  </div>
+                </div>
+              );
+            })
+          )}
+
+          {/* Pagination Controls for Saving Wallet */}
+          {savingTotalPages > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #ccc', marginBottom: '15px' }}>
+              <button 
+                disabled={savingCurrentPage === 1}
+                onClick={() => setSavingCurrentPage(prev => Math.max(1, prev - 1))}
+                style={{ ...styles.depositBtn, marginTop: 0, opacity: savingCurrentPage === 1 ? 0.5 : 1 }}
+              >
+                Prev
+              </button>
+              <span style={{ fontWeight: 'bold' }}>Page {savingCurrentPage} of {savingTotalPages}</span>
+              <button 
+                disabled={savingCurrentPage === savingTotalPages}
+                onClick={() => setSavingCurrentPage(prev => Math.min(savingTotalPages, prev + 1))}
+                style={{ ...styles.depositBtn, marginTop: 0, opacity: savingCurrentPage === savingTotalPages ? 0.5 : 1 }}
+              >
+                Next
+              </button>
+            </div>
+          )}
+        </>
       )}
 
-      {Pendingreq.sort((a, b) => moment(b.date).format('YYYYMMDDhhmm') - moment(a.date).format('YYYYMMDDhhmm')).map((item, index) => (
-        <div
-          key={index}
-          style={{
-            ...styles.transaction,
-            backgroundColor:'#F5F1E7',
-          }}
-        >
-          <div>
-            <div style={{ display: "flex", alignItems: "center" }}>
-                <div style={{display:'grid',placeItems:'center',background:'white',borderRadius:"50%",width:30,height:30,marginRight:10}}>
-                    <span style={{fontSize: 20,fontWeight:"bold",color:item.Dr==='0'?'green':'#918405' }}>
-                        {item.Dr==='0' ? "↓" : "↑"}
-                    </span>
-                </div>
-            <div style={{display:'flex',flexDirection:'column'}}>
-              <span>{'Cash Deposit ( Pending )'}</span>
-              <div style={{ fontSize: 12 }}>{moment(item.date).format("MMM Do YY")}</div>
-            </div>
-            </div>
-          </div>
-          <div style={{ fontWeight: "bold",color:'#918405' }}>
-          {'-'}{item.amount}
-          </div>
-        </div>
-      ))}
-      {TransitionData.sort((a, b) => moment(b.date).format('YYYYMMDDhhmm') - moment(a.date).format('YYYYMMDDhhmm')).map((item, index) => (
-        <div
-          key={index}
-          style={{
-            ...styles.transaction,
-            backgroundColor:'#F5F1E7',
-          }}
-        >
-          <div>
-            <div style={{ display: "flex", alignItems: "center" }}>
-                <div style={{display:'grid',placeItems:'center',background:'white',borderRadius:"50%",width:30,height:30,marginRight:10}}>
-                    <span style={{fontSize: 20,fontWeight:"bold",color:item.Dr!=='0'?'green':'red' }}>
-                        {item.Dr!=='0' ? "↓" : "↑"}
-                    </span>
-                </div>
-            <div style={{display:'flex',flexDirection:'column'}}>
-              <span>{item.Dr!=='0'?`${item.PaymentMode==='Membership fee'?"Membership Fee "+`${item.ChequeBankNo==='xxx'?"":item.ChequeBankNo}`:'EMI-Receipt ' +`${item.ChequeBankNo==='xxx'?"":item.ChequeBankNo}`}`:'Cash Deposit'}</span>
-              <div style={{ fontSize: 12 }}>{moment(item.date).format("MMM Do YY")}</div>
-            </div>
-            </div>
-          </div>
-          <div style={{ fontWeight: "bold",color:item.Dr!=='0'?'green':'red'}}>
-            {item.Dr!=='0'?'+':'-'}{item.Dr==='0'?item.Cr:item.Dr}
-          </div>
-        </div>
-      ))}
-
-{openlink&&<div style={{position:"absolute", top: 0, padding: 0,left:0,width:"100%",}}>
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        
-        justifyContent: 'flex-end',
-        height: '100vh',
-        backgroundColor: '#bfbebe87'
-      }}>
-        <div style={{
-          backgroundColor: 'white',
-          padding: '20px',
-          width: '100%',
-          maxWidth: '500px',
-          margin: 'auto',
-          borderRadius: '10px',
-        }}>
+      {/* ── BANK DEPOSIT MODAL ──────────────────────────────── */}
+      {openlink && (
+        <div style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", zIndex: 9999 }}>
           <div style={{
             display: 'flex',
-            justifyContent: 'center',
-            gap: '10px',
-            marginBottom: '10px',
-            flexWrap: 'wrap'
+            flexDirection: 'column',
+            justifyContent: 'flex-end',
+            height: '100vh',
+            backgroundColor: 'rgba(0, 0, 0, 0.45)'
           }}>
-            <input
-              type="number"
-              value={amount}
-              onChange={(e)=>setamount(e.target.value)}
-              style={{
-                backgroundColor: '#F2F2F2',
-                borderRadius: '5px',
-                border: '1px solid #000',
-                fontSize: '14px',
-                color: 'black',
-                padding: '8px 20px',
-                width: '70%',
-                minWidth: '200px'
-              }}
-            />
-            <button
-              onClick={requestpost}
-              style={{
-                backgroundColor: '#CCC4E6',
-                padding: '8px 20px',
-                borderRadius: '5px',
-                border: '1px solid #514579',
-                color: '#514579',
-                fontWeight: '700',
-                cursor: 'pointer',
-                width: '25%',
-                minWidth: '100px'
-              }}
-            >
-              Deposit
-            </button>
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px',marginBottom:16 }}>
-          <div style={formItem}>
-            <label style={labelStyle}>Bank Name</label>
-              <select
-                value={bankledger}
-                onChange={(e) => setbankledger(e.target.value)}
-                style={inputStyle}
-              >
-                <option value="">Select</option>
+            <div style={{
+              backgroundColor: 'white',
+              padding: '24px 20px',
+              width: '100%',
+              maxWidth: '500px',
+              margin: 'auto',
+              borderRadius: '12px',
+              boxShadow: '0 8px 30px rgba(0,0,0,0.2)'
+            }}>
+              <div style={{ fontSize: '17px', fontWeight: 'bold', color: '#514579', textAlign: 'center', marginBottom: '16px' }}>
+                {isSaving ? "Deposit into Saving Wallet" : "Deposit into Limit Wallet"}
+              </div>
 
-                {
-            lData.filter((item)=> item.GroupName==='Assets-Bank').map((item , index)=>(
-              <option key={item.Pushkey} value={item.Pushkey}>{item.LedgerName}</option>
-            ))
-          }
-                {/* {[
-                //   {
-                //   label:"Punjab Bank of India",
-                //   key:'A10'
-                // }
-                ,{
-                  label:"IDFC First Bank",
-                  key:'A10'
-                },
-                // {
-                //   label:"State Bank of India",
-                //   key:'A10'
-                // }
-              ].map((opt, i) => (
-                  <option key={i} value={opt.key}>{opt.label}</option>
-                ))} */}
-              </select>
-           </div>
-          <div style={formItem}>
-            <label style={labelStyle}>Bank Name</label>
-            <input required
+              <div style={{
+                display: 'flex',
+                justifyContent: 'center',
+                gap: '10px',
+                marginBottom: '16px',
+                flexWrap: 'wrap'
+              }}>
+                <input
+                  type="number"
+                  placeholder={isSaving ? "Enter deposit amount" : "Amount"}
+                  value={amount}
+                  onChange={(e) => setamount(e.target.value)}
+                  style={{
+                    backgroundColor: '#F9F9F9',
+                    borderRadius: '6px',
+                    border: '1px solid #ccc',
+                    fontSize: '15px',
+                    color: 'black',
+                    padding: '10px 16px',
+                    width: '65%',
+                    minWidth: '180px'
+                  }}
+                />
+                <button
+                  onClick={requestpost}
+                  disabled={loaderreq}
+                  style={{
+                    backgroundColor: loaderreq ? '#AAA' : '#514579',
+                    padding: '10px 20px',
+                    borderRadius: '6px',
+                    border: 'none',
+                    color: '#fff',
+                    fontWeight: '700',
+                    cursor: loaderreq ? 'not-allowed' : 'pointer',
+                    width: '28%',
+                    minWidth: '100px'
+                  }}
+                >
+                  {loaderreq ? 'Submitting...' : 'Deposit'}
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', marginBottom: 16 }}>
+                <div style={formItem}>
+                  <label style={labelStyle}>Bank Name</label>
+                  <select
+                    value={bankledger}
+                    onChange={(e) => setbankledger(e.target.value)}
+                    style={inputStyle}
+                  >
+                    <option value="">Select Bank</option>
+                    {(
+                      lData.filter((item) =>
+                        item.GroupName === 'Assets-Bank' ||
+                        (item.GroupName && item.GroupName.toLowerCase().includes('bank'))
+                      ).length > 0
+                        ? lData.filter((item) =>
+                            item.GroupName === 'Assets-Bank' ||
+                            (item.GroupName && item.GroupName.toLowerCase().includes('bank'))
+                          )
+                        : lData
+                    ).map((item, index) => (
+                      <option key={item._id || item.Code || index} value={item.Code || item._id}>
+                        {item.LedgerName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div style={formItem}>
+                  <label style={labelStyle}>Upload Proof / Slip</label>
+                  <input
+                    required
                     type="file"
                     accept="image/*"
-                    onChange={async(e) => {
-                      const file = e.target.files[0];
+                    onChange={(e) => {
+                      const file = e.target.files && e.target.files[0];
                       if (file) {
-                        showLoader()
-                        let url= await UploadFile(file)
-                        setproofurl(url)
-                        hideLoader()
+                        setSelectedFile(file);
                       }
                     }}
                     style={inputStyle}
                   />
-           </div>
-          </div>
+                  {selectedFile && (
+                    <div style={{ fontSize: '12px', color: '#2e7d32', marginTop: '4px', fontWeight: 'bold' }}>
+                      ✓ Selected: {selectedFile.name} ({(selectedFile.size / 1024).toFixed(1)} KB)
+                    </div>
+                  )}
+                </div>
+              </div>
 
-          <div style={{ textAlign: 'center' }}>
-              <button
-                onClick={() => setopenlink(false)}
-                style={{
-                  backgroundColor: '#F2E4A8',
-                  padding: '8px 20px',
-                  borderRadius: '5px',
-                  border: '1px solid #857326',
-                  color: '#857326',
-                  fontWeight: '700',
-                  cursor: 'pointer',
-                  marginTop: '20px'
-                }}
-              >
-                Back
-              </button>
+              <div style={{ textAlign: 'center' }}>
+                <button
+                  onClick={() => setopenlink(false)}
+                  style={{
+                    backgroundColor: '#F2E4A8',
+                    padding: '8px 24px',
+                    borderRadius: '5px',
+                    border: '1px solid #857326',
+                    color: '#857326',
+                    fontWeight: '700',
+                    cursor: 'pointer',
+                    marginTop: '10px'
+                  }}
+                >
+                  Cancel / Back
+                </button>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
-      </div>}
+      )}
     </div>
   );
 };
@@ -577,106 +716,92 @@ const getData = async()=>{
 export default WalletScreen;
 
 const styles = {
-    container: {
-      fontFamily: "Arial, sans-serif",
-      padding: 10,
-      maxWidth: 500,
-      margin: "0 auto",
-    },
-    header: {
-      backgroundColor: "#EAE3D3",
-      padding: 20,
-      borderRadius: 10,
-      marginBottom: 20,
-    },
-    profileRow: {
-      display: "flex",
-      alignItems: "center",
-      gap: 10,
-      marginBottom: 10,
-    },
-    avatar: {
-      width: 40,
-      height: 40,
-      borderRadius: "50%",
-      backgroundColor: "#746161",
-      color: "white",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      fontWeight: "600",
-      fontSize:16
-    },
-    userInfo: {
-      fontSize: 14,
-    },
-    balanceRow: {
-      backgroundColor: "#fff",
-      padding: 10,
-      borderRadius: 5,
-      marginTop: 10,
-      fontSize: 16,
-    },
-    balanceValue: {
-      color: "green",
-      fontWeight: "bold",
-    },
-    limitText: {
-      fontSize: 13,
-      marginTop: 10,
-    },
-    depositBtn: {
-      backgroundColor: "#b29c78",
-      padding: "8px 16px",
-      border: "none",
-      borderRadius: 5,
-      marginTop: 10,
-      cursor: "pointer",
-    },
-    transaction: {
-      backgroundColor: "#EAE3D3",
-      marginBottom: 10,
-      borderRadius: 8,
-      padding: 10,
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      fontSize: 14,
-    },
-  };
+  container: {
+    fontFamily: "Arial, sans-serif",
+    padding: 10,
+    maxWidth: 500,
+    margin: "0 auto",
+  },
+  header: {
+    backgroundColor: "#EAE3D3",
+    padding: 20,
+    borderRadius: 10,
+    marginBottom: 20,
+  },
+  profileRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 10,
+  },
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: "50%",
+    backgroundColor: "#746161",
+    color: "white",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontWeight: "600",
+    fontSize: 16,
+  },
+  userInfo: {
+    fontSize: 14,
+  },
+  balanceRow: {
+    backgroundColor: "#fff",
+    padding: 10,
+    borderRadius: 5,
+    marginTop: 10,
+    fontSize: 16,
+  },
+  balanceValue: {
+    color: "green",
+    fontWeight: "bold",
+  },
+  limitText: {
+    fontSize: 13,
+    marginTop: 10,
+  },
+  depositBtn: {
+    backgroundColor: "#b29c78",
+    padding: "8px 16px",
+    border: "none",
+    borderRadius: 5,
+    marginTop: 10,
+    cursor: "pointer",
+    fontWeight: 'bold'
+  },
+  transaction: {
+    backgroundColor: "#EAE3D3",
+    marginBottom: 10,
+    borderRadius: 8,
+    padding: 10,
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    fontSize: 14,
+  },
+};
 
-  const labelStyle = {
-    display: 'block',
-    marginBottom: '6px',
-    fontWeight: 'bold',
-  };
-  
-  const inputStyle = {
-    width: '100%',
-    padding: '10px',
-    borderRadius: '6px',
-    border: '1px solid #ccc',
-  };
-  
-  const buttonStyle = {
-    width: '100%',
-    backgroundColor: '#2e6de1',
-    color: '#fff',
-    padding: '10px',
-    border: 'none',
-    borderRadius: '6px',
-    fontWeight: 'bold',
-    fontSize: '16px',
-    marginBottom: '20px',
-  };
-  
-  const formGrid = {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: '16px',
-  };
-  
-  const formItem = {
-    flex: '1 1 48%',
-    minWidth: '250px',
-  };
+const labelStyle = {
+  display: 'block',
+  marginBottom: '6px',
+  fontWeight: 'bold',
+  fontSize: '13px'
+};
+
+const inputStyle = {
+  width: '100%',
+  padding: '10px',
+  borderRadius: '6px',
+  border: '1px solid #ccc',
+  fontSize: '14px',
+  boxSizing: 'border-box'
+};
+
+const formItem = {
+  flex: '1 1 48%',
+  minWidth: '220px',
+};

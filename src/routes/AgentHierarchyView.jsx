@@ -31,12 +31,18 @@ const AgentHierarchyView = () => {
   const fetchAgents = async () => {
     setLoading(true);
     try {
-      const res = await axios.get(`${BASE_URL}/agents`);
+      const agentCode = localStorage.getItem('agentCode') || localStorage.getItem('AUID') || '';
+      const url = agentCode ? `${BASE_URL}/agents?IntroCode=${agentCode}` : `${BASE_URL}/agents`;
+      const res = await axios.get(url, {
+        headers: { 'ngrok-skip-browser-warning': 'true' },
+      });
 
       let list = [];
       if (Array.isArray(res.data)) {
         list = res.data;
       } else if (Array.isArray(res.data?.data)) {
+        list = res.data.data;
+      } else if (res.data?.data && Array.isArray(res.data.data)) {
         list = res.data.data;
       } else if (res.data?.agents && Array.isArray(res.data.agents)) {
         list = res.data.agents;

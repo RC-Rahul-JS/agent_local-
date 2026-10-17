@@ -6,7 +6,7 @@
 
 // DOMAIN ko change karke aap local ya live pe test kar sakte hain.
 // Abhi ye aapke Local server (ya IP address) par set hai:
-export const DOMAIN = 'https://8e46-2405-201-3001-9096-25d4-82d8-2937-aabb.ngrok-free.app'; // Ya aap 'http://192.168.29.39:5001' likh sakte hain ya 'https://api.care2connect.in'
+export const DOMAIN = 'http://192.168.29.39:5001'; // Ya aap 'http://192.168.29.39:5001' likh sakte hain ya 'https://api.care2connect.in'
 
 // --------------------------------------------------------------------------
 // AUTOMATICALLY GENERATED ROUTES — DO NOT MODIFY BELOW

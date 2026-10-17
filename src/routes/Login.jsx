@@ -36,6 +36,10 @@ const Login = () => {
         
         // Save user data to localStorage
         localStorage.setItem('AUID', user.agentCode || username);
+        localStorage.setItem('agentCode', user.agentCode || username);
+        if (user._id || user.agent_id || user.id) {
+          localStorage.setItem('agent_id', user._id || user.agent_id || user.id);
+        }
         localStorage.setItem('Name', `${user.FirstName || ''} ${user.LastName || ''}`.trim());
         localStorage.setItem('MID', user.memberId || '');
         

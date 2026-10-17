@@ -17,6 +17,7 @@ const FirstRoute = () => {
     { id: 7, name: 'TPIN', icon: 'fa-solid fa-user-lock', action: 'tpin_manage' },
     { id: 11, name: 'Dr. Appoint', icon: 'fa-solid fa-user-doctor', action: 'dr_appointment' },
     { id: 12, name: 'Appoint List', icon: 'fa-solid fa-clipboard-list', action: 'appointment_list' },
+    { id: 13, name: 'Channel Ptr', icon: 'fa-solid fa-handshake-simple', action: 'channel-partner' },
   ];
 
   const handleIconClick = (item) => {

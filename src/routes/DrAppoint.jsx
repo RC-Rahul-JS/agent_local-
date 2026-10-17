@@ -99,6 +99,7 @@ const DrAppoint = () => {
   const [walletLoading, setWalletLoading] = useState(false);
   const [agentMongoId, setAgentMongoId] = useState('');
   const [walletDbId, setWalletDbId] = useState('');
+  const [markupAmount, setMarkupAmount] = useState(0);
 
   // Helper to extract clean numeric fee from selected doctor
   const getNumericFee = () => {
@@ -108,35 +109,74 @@ const DrAppoint = () => {
     return parseFloat(cleaned) || 0;
   };
 
-  // Fetch Agent Wallet Balance
+  // Fetch Agent Saving Wallet Balance directly by agent_id
   const fetchAgentWallet = async () => {
-    const rawAgentId = localStorage.getItem('AUID') || 'AG001';
     setWalletLoading(true);
 
     try {
-      const listRes = await axios.get(`${BASE_URL}/wallet/list`, {
-        timeout: 30000,
-        headers: { 'ngrok-skip-browser-warning': 'true' },
-      });
+      const headers = { 'ngrok-skip-browser-warning': 'true' };
+      let mongoId = agentMongoId || localStorage.getItem('agent_id');
+      const rawAgentCode = localStorage.getItem('AUID') || 'AG001';
 
-      const wallets = listRes.data?.data || [];
-      const match = wallets.find(
-        (w) =>
-          (w.agentCode || '').toLowerCase() === rawAgentId.toLowerCase() ||
-          (w.agent_id || '').toLowerCase() === rawAgentId.toLowerCase()
-      );
-
-      if (match) {
-        const bal = match.availableCredit !== undefined ? Number(match.availableCredit) : 0;
-        setWalletBalance(bal);
-        setWalletNumber(match.walletNumber || '');
-        if (match.agent_id) setAgentMongoId(match.agent_id);
-        if (match._id) setWalletDbId(match._id);
-      } else {
-        setWalletBalance(0);
+      // If mongoId is not cached or invalid, resolve agent_id from agentCode
+      if (!mongoId || !/^[a-f\d]{24}$/i.test(mongoId)) {
+        try {
+          const limitListRes = await axios.get(`${BASE_URL}/wallet/list`, {
+            timeout: 20000,
+            headers,
+          });
+          const limitWallets = limitListRes.data?.data || [];
+          const match = limitWallets.find(
+            (w) =>
+              (w.agentCode || '').toLowerCase() === rawAgentCode.toLowerCase() ||
+              (w.agent_id || '').toLowerCase() === rawAgentCode.toLowerCase()
+          );
+          if (match?.agent_id) {
+            mongoId = match.agent_id;
+            localStorage.setItem('agent_id', mongoId);
+            setAgentMongoId(mongoId);
+          }
+        } catch (subErr) {
+          console.warn('Error resolving agent Mongo ID for saving wallet:', subErr.message);
+        }
       }
+
+      if (mongoId) {
+        // Directly fetch saving-wallet/details?agent_id=...
+        const detailsRes = await axios.get(`${BASE_URL}/saving-wallet/details?agent_id=${mongoId}`, {
+          timeout: 20000,
+          headers,
+        });
+        if (detailsRes.data?.success && detailsRes.data?.data) {
+          const respData = detailsRes.data.data;
+          const wallet = respData.wallet;
+
+          // Extract agent's allocated markup amount
+          const mAmount = respData.agent?.markup_amount !== undefined && respData.agent?.markup_amount !== null
+            ? Number(respData.agent.markup_amount)
+            : 0;
+          setMarkupAmount(mAmount);
+
+          if (wallet) {
+            const bal = wallet.balance !== undefined ? Number(wallet.balance) : 0;
+            setWalletBalance(bal);
+            setWalletNumber(wallet.walletNumber || '');
+            if (wallet.agent_id) {
+              setAgentMongoId(wallet.agent_id);
+              localStorage.setItem('agent_id', wallet.agent_id);
+            }
+            if (wallet._id) setWalletDbId(wallet._id);
+            return;
+          }
+        }
+      }
+
+      setWalletBalance(0);
+      setWalletNumber('');
+      setMarkupAmount(0);
     } catch (err) {
-      console.warn('Error fetching agent wallet:', err.message);
+      console.warn('Error fetching agent saving wallet details:', err.message);
+      setWalletBalance(0);
     } finally {
       setWalletLoading(false);
     }
@@ -624,9 +664,12 @@ const DrAppoint = () => {
 
   // STEP 2: AGENT CREATE ORDER & APPOINTMENT CONFIRMATION (EXECUTED AFTER REVIEW CONFIRMATION)
   const executeBookingAndPayment = async () => {
-    // 1. Strict validation: Wallet balance check
+    // 1. Strict validation: Wallet balance check against Total Payable (Fee + Markup)
     const numericFee = getNumericFee();
-    if (walletBalance !== null && walletBalance < numericFee) {
+    const currentMarkup = Number(markupAmount || 0);
+    const totalPayable = numericFee + currentMarkup;
+
+    if (walletBalance !== null && walletBalance < totalPayable) {
       Swal.fire({
         icon: 'error',
         title: 'Insufficient Wallet Balance',
@@ -634,8 +677,10 @@ const DrAppoint = () => {
           <div style="font-size: 14px; text-align: left; padding: 12px; background: #fef2f2; border: 1.5px solid #fca5a5; border-radius: 8px;">
             <p style="margin: 0 0 6px 0; color: #991b1b; font-weight: 700;">Aapke wallet me paryapt balance nahi hai!</p>
             <p style="margin: 4px 0; color: #374151;">Available Balance: <strong style="color: #dc2626;">₹${Number(walletBalance || 0).toFixed(2)}</strong></p>
-            <p style="margin: 4px 0; color: #374151;">Required Fee: <strong style="color: #1e3a8a;">₹${numericFee.toFixed(2)}</strong></p>
-            <p style="margin: 4px 0; color: #374151;">Shortage: <strong style="color: #dc2626;">₹${(numericFee - Number(walletBalance || 0)).toFixed(2)}</strong></p>
+            <p style="margin: 4px 0; color: #374151;">Consultation Fee: ₹${numericFee.toFixed(2)}</p>
+            ${currentMarkup > 0 ? `<p style="margin: 4px 0; color: #2563eb;">Markup Amount: ₹${currentMarkup.toFixed(2)}</p>` : ''}
+            <p style="margin: 4px 0; color: #374151;">Total Payable: <strong style="color: #1e3a8a;">₹${totalPayable.toFixed(2)}</strong></p>
+            <p style="margin: 4px 0; color: #374151;">Shortage: <strong style="color: #dc2626;">₹${(totalPayable - Number(walletBalance || 0)).toFixed(2)}</strong></p>
           </div>
           <p style="margin-top: 12px; font-size: 13px; color: #64748b;">Kripya wallet recharge karne ke baad appointment book karein.</p>
         `,
@@ -650,24 +695,18 @@ const DrAppoint = () => {
     const rawAgentId = localStorage.getItem('AUID') || 'AG001';
     showLoader();
 
-    // Resolve Mongo ObjectId for backend agent wallet lookup
-    let targetAgentId = agentMongoId;
+    // Resolve Mongo ObjectId for backend agent saving wallet lookup
+    let targetAgentId = agentMongoId || localStorage.getItem('agent_id');
     let targetWalletId = walletDbId;
-    if (!targetAgentId || !/^[a-f\d]{24}$/i.test(targetAgentId)) {
+    if (!targetWalletId || !targetAgentId || !/^[a-f\d]{24}$/i.test(targetAgentId)) {
       try {
-        const listRes = await axios.get(`${BASE_URL}/wallet/list`, {
+        const detailsRes = await axios.get(`${BASE_URL}/saving-wallet/details?agent_id=${targetAgentId || rawAgentId}`, {
           timeout: 20000,
           headers: { 'ngrok-skip-browser-warning': 'true' },
         });
-        const wallets = listRes.data?.data || [];
-        const match = wallets.find(
-          (w) =>
-            (w.agentCode || '').toLowerCase() === rawAgentId.toLowerCase() ||
-            (w.agent_id || '').toLowerCase() === rawAgentId.toLowerCase()
-        );
-        if (match) {
-          if (match.agent_id) targetAgentId = match.agent_id;
-          if (match._id) targetWalletId = match._id;
+        if (detailsRes.data?.success && detailsRes.data?.data?.wallet) {
+          targetAgentId = detailsRes.data.data.wallet.agent_id || targetAgentId;
+          targetWalletId = detailsRes.data.data.wallet._id || targetWalletId;
         }
       } catch (_) { }
     }
@@ -679,6 +718,9 @@ const DrAppoint = () => {
       agentCode: rawAgentId,
       agentId: rawAgentId,
       wallet_id: targetWalletId || targetAgentId || rawAgentId,
+      saving_wallet_id: targetWalletId || '',
+      wallet_number: walletNumber || '',
+      wallet_type: 'saving',
       mobile: formData.mobileNumber.trim(),
       patient_phone: formData.mobileNumber.trim(),
       doctor_id: docId,
@@ -706,6 +748,7 @@ const DrAppoint = () => {
       vaccine: true,
       amount: selectedDoctor.appointmentfee || selectedDoctor.fee || 250,
       fee: selectedDoctor.appointmentfee || selectedDoctor.fee || 250,
+      markup_amount: currentMarkup,
     };
 
     console.log('Initiating agent appointment order (/agent-create-order):', appointmentPayload);
@@ -1957,7 +2000,9 @@ const DrAppoint = () => {
               {/* Agent Wallet Payment & Balance Status Card */}
               {(() => {
                 const numericFee = getNumericFee();
-                const isSufficient = walletBalance !== null && walletBalance >= numericFee;
+                const currentMarkup = Number(markupAmount || 0);
+                const totalPayable = numericFee + currentMarkup;
+                const isSufficient = walletBalance !== null && walletBalance >= totalPayable;
                 return (
                   <div style={{
                     backgroundColor: isSufficient ? '#f0fdf4' : '#fef2f2',
@@ -1991,7 +2036,7 @@ const DrAppoint = () => {
                             Agent Wallet Payment
                           </div>
                           <div style={{ fontSize: '11px', color: '#64748b' }}>
-                            {walletNumber ? `Wallet: ${walletNumber}` : 'Local Wallet'}
+                            {walletNumber ? `Wallet: ${walletNumber}` : 'Saving Wallet'}
                           </div>
                         </div>
                       </div>
@@ -2018,6 +2063,32 @@ const DrAppoint = () => {
                       </button>
                     </div>
 
+                    {/* Fee, Markup & Total Payable Breakdown */}
+                    <div style={{
+                      backgroundColor: '#ffffff',
+                      borderRadius: '8px',
+                      border: '1px solid #e2e8f0',
+                      padding: '10px 14px',
+                      marginBottom: '10px',
+                      fontSize: '12px'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', color: '#475569' }}>
+                        <span>Doctor Consultation Fee:</span>
+                        <strong>₹{numericFee.toFixed(2)}</strong>
+                      </div>
+                      {currentMarkup > 0 && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', color: '#2563eb' }}>
+                          <span>Channel Partner Markup:</span>
+                          <strong>+ ₹{currentMarkup.toFixed(2)}</strong>
+                        </div>
+                      )}
+                      <div style={{ height: '1px', backgroundColor: '#e2e8f0', margin: '6px 0' }}></div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#1e3a8a', fontWeight: '700' }}>
+                        <span>Total Payable:</span>
+                        <span>₹{totalPayable.toFixed(2)}</span>
+                      </div>
+                    </div>
+
                     <div style={{
                       display: 'flex',
                       justifyContent: 'space-between',
@@ -2042,24 +2113,19 @@ const DrAppoint = () => {
                       </div>
                       <div style={{ textAlign: 'right' }}>
                         <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: '600' }}>
-                          Deduction (Fee)
+                          Total Payable
                         </span>
                         <div style={{ fontSize: '19px', fontWeight: '800', color: '#1e3a8a' }}>
-                          ₹{numericFee.toFixed(2)}
+                          ₹{totalPayable.toFixed(2)}
                         </div>
                       </div>
                     </div>
 
-                    {/* Status Alert Note */}
-                    {isSufficient ? (
-                      <div style={{ fontSize: '12px', color: '#15803d', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <i className="fa-solid fa-circle-check"></i>
-                        Paryapt balance uplabdh hai. Booking ke baad remaining balance: ₹{(walletBalance - numericFee).toFixed(2)}
-                      </div>
-                    ) : (
+                    {/* Status Alert Note (only shown if insufficient balance) */}
+                    {!isSufficient && (
                       <div style={{ fontSize: '12px', color: '#b91c1c', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <i className="fa-solid fa-circle-exclamation"></i>
-                        Insufficient Wallet Balance! Required ₹{numericFee.toFixed(2)}, Available ₹{Number(walletBalance || 0).toFixed(2)}. Payment nahi ho sakta.
+                        Insufficient Wallet Balance! Required ₹{totalPayable.toFixed(2)}, Available ₹{Number(walletBalance || 0).toFixed(2)}. Payment nahi ho sakta.
                       </div>
                     )}
                   </div>
@@ -2099,7 +2165,9 @@ const DrAppoint = () => {
 
                 {(() => {
                   const numericFee = getNumericFee();
-                  const isSufficient = walletBalance !== null && walletBalance >= numericFee;
+                  const currentMarkup = Number(markupAmount || 0);
+                  const totalPayable = numericFee + currentMarkup;
+                  const isSufficient = walletBalance !== null && walletBalance >= totalPayable;
                   return (
                     <button
                       type="button"
@@ -2123,7 +2191,7 @@ const DrAppoint = () => {
                     >
                       <i className={`fa-solid ${isSufficient ? 'fa-calendar-check' : 'fa-ban'}`}></i>
                       {isSufficient
-                        ? `Confirm & Book (${selectedDoctor.fee})`
+                        ? `Pay ₹${totalPayable.toFixed(2)} & Confirm Booking`
                         : `Insufficient Balance (₹${Number(walletBalance || 0).toFixed(2)})`}
                     </button>
                   );
